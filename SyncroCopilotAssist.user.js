@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syncro - Copilot Assist
 // @namespace    http://tampermonkey.net/
-// @version      1.2.4
+// @version      1.2.5
 // @description  Copy detailed Syncro ticket context into a Copilot-ready prompt (including AI summary and communication history) and open Copilot.
 // @author       Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
@@ -231,29 +231,46 @@
     var seen = {};
     var commentList = document.querySelector("div.comment-list.pbm");
     var nodes = commentList
-      ? commentList.querySelectorAll(".ticket-comment, .comment, .timeline-item, .activity-item, .communication-item, .note, li, .media")
+      ? commentList.querySelectorAll(
+          "div[id^='comment-'][data-testid='reply-comment'], div[id^='comment-'].hover-parent, .ticket-comment, .comment"
+        )
       : document.querySelectorAll(".ticket-comment, .comment, .timeline-item, .activity-item, .communication-item, .note");
+
+    function extractCommentBodyText(node) {
+      if (!node) return "";
+
+      var bodyEl = node.querySelector(
+        "div[id^='comment-body-'], .rich-text-comment, div[id^='purify-text-comment-'], .comment-body, .ticket-comment-body, .fr-view, .body"
+      );
+      if (!bodyEl) return "";
+
+      // Clone so we can remove non-content nodes without mutating the page.
+      var clone = bodyEl.cloneNode(true);
+      var junk = clone.querySelectorAll("script, style, noscript, .hover-actions, .btn-group, .dropdown-menu");
+      for (var k = 0; k < junk.length; k++) {
+        if (junk[k] && junk[k].parentNode) junk[k].parentNode.removeChild(junk[k]);
+      }
+
+      return safeBlockText(clone);
+    }
 
     for (var i = 0; i < nodes.length; i++) {
       var node = nodes[i];
 
       var author =
-        safeText(node.querySelector(".comment-author, .author, .user-name, .media-heading a, .ticket-comment-header a")) ||
+        safeText(node.querySelector(".author-label, .comment-author, .author, .user-name, .media-heading a, .ticket-comment-header a")) ||
         node.getAttribute("data-author") ||
         node.getAttribute("data-user-name") ||
         "Unknown";
 
-      var timeEl = node.querySelector("time, .comment-date, .date, .timestamp, [data-time]");
+      var timeEl = node.querySelector(".meta .mrm[title], .meta [title], time, .comment-date, .date, .timestamp, [data-time]");
       var timestamp =
         (timeEl && (timeEl.getAttribute("datetime") || timeEl.getAttribute("title") || safeText(timeEl))) ||
         node.getAttribute("data-time") ||
         node.getAttribute("data-created-at") ||
         "Unknown";
 
-      var bodyEl = node.querySelector(
-        ".note-editable, .comment-body, .body, .message, .ticket-comment-body, .fr-view"
-      );
-      var body = safeBlockText(bodyEl || node);
+      var body = extractCommentBodyText(node);
 
       if (!body || body.length < 8) continue;
 
