@@ -1,10 +1,10 @@
 # Syncro Tickets Tampermonkey Helper
 
-A Tampermonkey userscript that improves day-to-day ticket handling in Syncro by adding faster time entry tools, copy helpers, sticky header behavior, and comment workflow enhancements.
+Tampermonkey userscripts that improve day-to-day ticket handling in Syncro by adding faster time entry tools, copy helpers, sticky header behavior, comment workflow enhancements, and Copilot-ready ticket assist prompts.
 
 ## What This Script Does
 
-This script enhances Syncro ticket pages for the Syncro tenant domains:
+These scripts enhance Syncro ticket pages for the Syncro tenant domains:
 
 - `https://*.syncromsp.com/tickets/*`
 - `https://*.shield.syncromsp.com/tickets/*`
@@ -81,6 +81,17 @@ It is designed for technicians who work tickets all day and need fewer clicks fo
 - Per-cycle widget lookup cache to reduce repeated DOM scans
 - Empty-copy guards to avoid copying blank values
 
+### Copilot Assist (Separate Script)
+
+- Adds a **Copilot Assist** button to ticket pages
+- Collects key ticket context (ticket number, subject, status, priority, assignee, customer/contact info, latest comment snippet, link)
+- Builds a structured prompt for response drafting and diagnosis support
+- Copies the prompt to clipboard and opens Copilot in a new tab
+- Supports assist modes:
+  - Response draft
+  - Technical diagnosis
+  - Both
+
 ## Requirements
 
 - Google Chrome, Microsoft Edge, or Firefox
@@ -98,38 +109,52 @@ Install Tampermonkey from the browser extension store:
 - Microsoft Edge Add-ons
 - Firefox Add-ons
 
-### 2. Install the Userscript
+### 2. Install a Userscript
+
+This repository contains two userscripts:
+
+- `SyncroTickets.user.js` (main workflow helper)
+- `SyncroCopilotAssist.user.js` (Copilot context/prompt helper)
 
 Option A: Install from GitHub raw URL
 
-1. Open the raw script URL in your browser.
+1. Open a raw script URL in your browser.
 2. Tampermonkey will detect and prompt to install.
 3. Approve installation.
 
-Direct install URL for this repository:
+Direct install URLs for this repository:
 
 `https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroTickets.user.js`
+
+`https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroCopilotAssist.user.js`
 
 Generic raw URL format:
 
 `https://raw.githubusercontent.com/<owner>/<repo>/<branch>/SyncroTickets.user.js`
 
+`https://raw.githubusercontent.com/<owner>/<repo>/<branch>/SyncroCopilotAssist.user.js`
+
 Option B: Manual install
 
 1. Open Tampermonkey dashboard.
 2. Create a new script.
-3. Paste contents of `SyncroTickets.user.js`.
+3. Paste contents of `SyncroTickets.user.js` or `SyncroCopilotAssist.user.js`.
 4. Save.
 
 ## Auto Updates via GitHub HTTP Reference
 
 Tampermonkey can auto-update userscripts when metadata includes `@updateURL` and `@downloadURL` pointing to GitHub raw HTTP endpoints.
 
-Add these lines to the userscript metadata header (top of `SyncroTickets.user.js`):
+Add these lines to each userscript metadata header:
 
 ```javascript
 // @downloadURL  https://raw.githubusercontent.com/<owner>/<repo>/<branch>/SyncroTickets.user.js
 // @updateURL    https://raw.githubusercontent.com/<owner>/<repo>/<branch>/SyncroTickets.user.js
+```
+
+```javascript
+// @downloadURL  https://raw.githubusercontent.com/<owner>/<repo>/<branch>/SyncroCopilotAssist.user.js
+// @updateURL    https://raw.githubusercontent.com/<owner>/<repo>/<branch>/SyncroCopilotAssist.user.js
 ```
 
 Recommended for this repository:
@@ -137,6 +162,11 @@ Recommended for this repository:
 ```javascript
 // @downloadURL  https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroTickets.user.js
 // @updateURL    https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroTickets.user.js
+```
+
+```javascript
+// @downloadURL  https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroCopilotAssist.user.js
+// @updateURL    https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroCopilotAssist.user.js
 ```
 
 If the repository uses `master` instead of `main`, replace `main` with `master`.
@@ -173,6 +203,7 @@ To enable additional Syncro tenant domains, add additional `@match` lines.
 Repository files:
 
 - `SyncroTickets.user.js`: main userscript
+- `SyncroCopilotAssist.user.js`: Copilot prompt builder and launcher helper
 - `view-source_https___bytesolutions.shield.syncromsp.com_tickets_110818582.html`: page source reference snapshot for selector debugging
 
 ## Troubleshooting
@@ -181,6 +212,7 @@ Repository files:
 - If updates are not detected, verify `@updateURL` and `@downloadURL` values.
 - Confirm Tampermonkey script is enabled.
 - Check that URL matches one of the `@match` patterns.
+- For Copilot Assist, if Copilot does not open automatically, allow popups/new tabs for the site and try again.
 
 ## Disclaimer
 
