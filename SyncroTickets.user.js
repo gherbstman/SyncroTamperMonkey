@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Syncro – Duration Helper - Final
+// @name         Syncro – Ticket Helper
 // @homepageURL  https://github.com/gherbstman/SyncroTamperMonkey
 // @namespace    http://tampermonkey.net/
 // @version      2.7.1
