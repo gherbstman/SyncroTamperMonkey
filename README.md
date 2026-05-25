@@ -73,6 +73,32 @@ It is designed for technicians who work tickets all day and need fewer clicks fo
 - Subject-aware canned response insertion
 - Uses full canned body from `data-body` attributes (HTML-decoded)
 
+### Canned Response Subject Matching (How It Works)
+
+The right-click menu in the comment editor can show canned responses based on the currently selected comment subject.
+
+How the script filters canned responses:
+
+- Right-click inside the comment editor (`.note-editable` or `#comment_body`) to open the custom menu.
+- The script reads the current value of the comment subject field (`#comment_subject`).
+- If a comment subject is selected, only canned responses with a matching subject are shown.
+- Matching is case-insensitive, but it is an exact text match (not partial/contains).
+- If the comment subject field is blank, the script shows all canned responses that have a valid canned body.
+
+How to configure canned responses in Syncro:
+
+1. Open your canned response list in Syncro and edit/create a canned response.
+2. Set the canned response Subject/Matching Subject to the exact same subject value technicians choose in the ticket comment subject field.
+3. Save the canned response body content normally.
+4. In a ticket, choose that same comment subject first, then right-click in the editor to see matching canned entries.
+
+Important behavior notes:
+
+- If no canned entries appear, first confirm a comment subject is selected and that the canned response subject matches exactly.
+- Canned entries without a mapped subject will not appear when a subject is selected.
+- The menu always includes Copy/Cut/Paste; the Canned responses section appears only when matching entries are found.
+- The script inserts the full canned response body (decoded from HTML entities), so formatting/content is preserved better than truncated table text.
+
 ### Reliability and Performance Improvements
 
 - Mutation filtering to reduce unnecessary reinjection cycles
@@ -91,6 +117,39 @@ It is designed for technicians who work tickets all day and need fewer clicks fo
   - Response draft
   - Technical diagnosis
   - Both
+- Supports a user-configurable Copilot URL (including custom agents)
+
+### Copilot Assist Usage and URL Configuration
+
+How to use Copilot Assist on a ticket:
+
+1. Click **Copilot Assist** in the ticket action bar.
+2. Choose a mode from the dropdown:
+  - Both (Response + Diagnosis)
+  - Response Draft
+  - Diagnosis Help
+3. The script copies ticket context to clipboard and opens your configured Copilot URL in a new tab.
+4. Paste the prompt into Copilot with `Ctrl+V` (or `Cmd+V` on macOS).
+
+How to configure your Copilot URL:
+
+1. On the ticket page, **Shift+Click** the **Copilot Assist** button.
+2. Enter your preferred Copilot URL when prompted.
+3. Save to store the URL for your user/browser profile.
+4. Leave it blank to clear your preference and return to standard Copilot chat.
+
+Recommended usage with custom agents:
+
+- If your team has a custom Copilot agent, paste that agent's chat URL so Copilot Assist opens directly into your agent experience.
+- This is useful for role-specific workflows (helpdesk triage, incident response, escalation assistant, compliance response templates, etc.).
+- Each technician can store their own preferred URL independently on their own browser profile.
+
+URL requirements and validation:
+
+- URL must be HTTPS.
+- Host must be `m365.cloud.microsoft`.
+- Path must begin with `/chat`.
+- Invalid URLs are rejected so technicians do not accidentally store malformed/non-Copilot links.
 
 ## Requirements
 
@@ -213,6 +272,9 @@ Repository files:
 - Confirm Tampermonkey script is enabled.
 - Check that URL matches one of the `@match` patterns.
 - For Copilot Assist, if Copilot does not open automatically, allow popups/new tabs for the site and try again.
+- For Copilot Assist URL issues, use **Shift+Click** on the Copilot Assist button to reconfigure the saved URL.
+- Ensure configured Copilot URLs follow `https://m365.cloud.microsoft/chat...`.
+- For canned responses, ensure the ticket comment subject value exactly matches the canned response matching subject.
 
 ## Disclaimer
 
