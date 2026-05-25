@@ -8,6 +8,8 @@
 // @match        https://*.shield.syncromsp.com/tickets/*
 // @grant        GM_setClipboard
 // @grant        GM_openInTab
+// @downloadURL  https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroCopilotAssist.user.js
+// @updateURL    https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroCopilotAssist.user.js
 // ==/UserScript==
 
 (function () {
