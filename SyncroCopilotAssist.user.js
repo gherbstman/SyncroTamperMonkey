@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syncro - Copilot Assist
 // @namespace    http://tampermonkey.net/
-// @version      1.2.2
+// @version      1.2.3
 // @description  Copy detailed Syncro ticket context into a Copilot-ready prompt (including AI summary and communication history) and open Copilot.
 // @author       Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
@@ -72,6 +72,17 @@
     for (var j = 0; j < ths.length; j++) {
       if (safeText(ths[j]) === labelText) {
         var td = ths[j].nextElementSibling;
+        if (!td) return "";
+
+        // When field is rendered as a <select> (e.g., Status/Priority),
+        // use only the currently selected option text.
+        var selectEl = td.querySelector("select");
+        if (selectEl && selectEl.options && selectEl.selectedIndex >= 0) {
+          var selected = selectEl.options[selectEl.selectedIndex];
+          var selectedText = safeText(selected);
+          if (selectedText) return selectedText;
+        }
+
         return safeText(td);
       }
     }
@@ -101,6 +112,45 @@
     }
 
     return "";
+  }
+
+  function getAssignedContact() {
+    // Prefer tooltip/source value over visible inline text to avoid id-like placeholders.
+    var customerWidgetHeaders = document.querySelectorAll(".widget-header h3");
+    var customerWidget = null;
+
+    for (var i = 0; i < customerWidgetHeaders.length; i++) {
+      if (safeText(customerWidgetHeaders[i]) === "Customer Info") {
+        customerWidget = customerWidgetHeaders[i].closest(".widget");
+        break;
+      }
+    }
+
+    if (customerWidget) {
+      var ths = customerWidget.querySelectorAll("th");
+      for (var j = 0; j < ths.length; j++) {
+        if (safeText(ths[j]) === "Assigned Contact") {
+          var td = ths[j].nextElementSibling;
+          if (!td) break;
+
+          var attrHolder = td.querySelector("[data-original-title]") || td;
+          var originalTitle = attrHolder.getAttribute && attrHolder.getAttribute("data-original-title");
+          if (originalTitle && String(originalTitle).trim()) {
+            return String(originalTitle).trim();
+          }
+
+          return safeText(td);
+        }
+      }
+    }
+
+    var globalHolder = document.querySelector("[id*='_contact_'][data-original-title], [id*='_contact_'] [data-original-title]");
+    if (globalHolder) {
+      var globalTitle = globalHolder.getAttribute("data-original-title");
+      if (globalTitle && String(globalTitle).trim()) return String(globalTitle).trim();
+    }
+
+    return getCustomerField("Assigned Contact");
   }
 
   function getCustomerName() {
@@ -153,9 +203,10 @@
   function getCommunicationEntries() {
     var items = [];
     var seen = {};
-    var nodes = document.querySelectorAll(
-      ".ticket-comment, .comment, .timeline-item, .activity-item, .communication-item, .note"
-    );
+    var commentList = document.querySelector("div.comment-list.pbm");
+    var nodes = commentList
+      ? commentList.querySelectorAll(".ticket-comment, .comment, .timeline-item, .activity-item, .communication-item, .note, li, .media")
+      : document.querySelectorAll(".ticket-comment, .comment, .timeline-item, .activity-item, .communication-item, .note");
 
     for (var i = 0; i < nodes.length; i++) {
       var node = nodes[i];
@@ -516,7 +567,7 @@
       priority: getTicketField("Priority"),
       assignee: getTicketField("Assignee"),
       customer: getCustomerName(),
-      contact: getCustomerField("Assigned Contact"),
+      contact: getAssignedContact(),
       email: getPrimaryEmail(),
       phone: getPrimaryPhone(),
       created: getTicketField("Created"),
