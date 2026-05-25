@@ -2,7 +2,7 @@
 // @name         Syncro – Ticket Helper
 // @homepageURL  https://github.com/gherbstman/SyncroTamperMonkey
 // @namespace    http://tampermonkey.net/
-// @version      2.7.1
+// @version      2.7.2
 // @description  Add smart duration presets + ticket page efficiency tools (copy buttons, sticky header, priority/SLA hotkeys, WoC submit, canned response context menu)
 // @author       Nick F + Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
