@@ -6,8 +6,8 @@ A Tampermonkey userscript that improves day-to-day ticket handling in Syncro by 
 
 This script enhances Syncro ticket pages for the Syncro tenant domains:
 
-- https://*.syncromsp.com/tickets/*
-- https://*.shield.syncromsp.com/tickets/*
+- `https://*.syncromsp.com/tickets/*`
+- `https://*.shield.syncromsp.com/tickets/*`
 
 It is designed for technicians who work tickets all day and need fewer clicks for repetitive actions.
 
