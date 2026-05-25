@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         Syncro - Copilot Assist
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
-// @description  Copy key Syncro ticket details into a Copilot-ready prompt and open Copilot for fast response/diagnosis help.
+// @version      1.1.0
+// @description  Copy detailed Syncro ticket context into a Copilot-ready prompt (including AI summary and communication history) and open Copilot.
 // @author       Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
 // @match        https://*.shield.syncromsp.com/tickets/*
 // @grant        GM_setClipboard
 // @grant        GM_openInTab
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @downloadURL  https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroCopilotAssist.user.js
 // @updateURL    https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroCopilotAssist.user.js
 // ==/UserScript==
@@ -15,8 +17,20 @@
 (function () {
   "use strict";
 
+  var DEFAULT_COPILOT_CHAT_URL = "https://m365.cloud.microsoft/chat";
+  var AGENT_URL_STORAGE_KEY = "tmCopilotPreferredAgentUrl";
+  var AUTO_EXPAND_SHOW_MORE_COMMENTS = true;
+
   function safeText(el) {
     return el ? String(el.textContent || "").replace(/\s+/g, " ").trim() : "";
+  }
+
+  function safeBlockText(el) {
+    if (!el) return "";
+    var raw = String(el.innerText || el.textContent || "").replace(/\r/g, "");
+    var lines = raw.split("\n");
+    for (var i = 0; i < lines.length; i++) lines[i] = lines[i].replace(/[ \t]+$/g, "");
+    return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   }
 
   function getTicketIdFromPath() {
@@ -112,19 +126,89 @@
     return getCustomerField("Phone");
   }
 
-  function getLatestCommentSnippet() {
+  function findAiSummaryText() {
     var candidates = document.querySelectorAll(
-      ".ticket-comment .note-editable, .ticket-comment .comment-body, .comment .note-editable, .comment .comment-body"
+      '[data-sidepack-react-class*="ai-summary"], [data-testid*="ai-summary"], .ai-summary, .ticket-ai-summary, [id*="ai-summary"]'
     );
 
-    for (var i = candidates.length - 1; i >= 0; i--) {
-      var text = safeText(candidates[i]);
-      if (text && text.length > 20) {
-        return text.slice(0, 1200);
+    for (var i = 0; i < candidates.length; i++) {
+      var text = safeBlockText(candidates[i]);
+      if (text && text.length > 20) return text;
+    }
+
+    var widgetHeaders = document.querySelectorAll(".widget-header h3");
+    for (var j = 0; j < widgetHeaders.length; j++) {
+      if (safeText(widgetHeaders[j]).toLowerCase() === "summary") {
+        var widget = widgetHeaders[j].closest(".widget");
+        if (!widget) continue;
+        var body = widget.querySelector(".widget-content") || widget;
+        var summaryText = safeBlockText(body);
+        if (summaryText && summaryText.length > 20) return summaryText;
       }
     }
 
     return "";
+  }
+
+  function getCommunicationEntries() {
+    var items = [];
+    var seen = {};
+    var nodes = document.querySelectorAll(
+      ".ticket-comment, .comment, .timeline-item, .activity-item, .communication-item, .note"
+    );
+
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+
+      var author =
+        safeText(node.querySelector(".comment-author, .author, .user-name, .media-heading a, .ticket-comment-header a")) ||
+        node.getAttribute("data-author") ||
+        node.getAttribute("data-user-name") ||
+        "Unknown";
+
+      var timeEl = node.querySelector("time, .comment-date, .date, .timestamp, [data-time]");
+      var timestamp =
+        (timeEl && (timeEl.getAttribute("datetime") || timeEl.getAttribute("title") || safeText(timeEl))) ||
+        node.getAttribute("data-time") ||
+        node.getAttribute("data-created-at") ||
+        "Unknown";
+
+      var bodyEl = node.querySelector(
+        ".note-editable, .comment-body, .body, .message, .ticket-comment-body, .fr-view"
+      );
+      var body = safeBlockText(bodyEl || node);
+
+      if (!body || body.length < 8) continue;
+
+      var key = author + "|" + timestamp + "|" + body;
+      if (seen[key]) continue;
+      seen[key] = true;
+
+      items.push({
+        author: String(author || "Unknown").trim() || "Unknown",
+        timestamp: String(timestamp || "Unknown").trim() || "Unknown",
+        body: body
+      });
+    }
+
+    return items;
+  }
+
+  function formatCommunicationHistory(entries) {
+    if (!entries || !entries.length) {
+      return "No communication entries found on the currently loaded page content.";
+    }
+
+    var parts = [];
+    for (var i = 0; i < entries.length; i++) {
+      parts.push("Entry " + (i + 1));
+      parts.push("Author: " + entries[i].author);
+      parts.push("Date/Time: " + entries[i].timestamp);
+      parts.push("Body:");
+      parts.push(entries[i].body);
+      parts.push("");
+    }
+    return parts.join("\n").trim();
   }
 
   function detectRequestType() {
@@ -154,6 +238,7 @@
       "- Keep assumptions explicit.",
       "- If information is missing, list clarifying questions.",
       "- Keep recommendations practical and low-risk.",
+      "- Use the communication history as the source of truth for chronology and context.",
       "",
       "Ticket details:",
       "- Ticket Number: " + (details.ticketNumber || "Unknown"),
@@ -169,15 +254,22 @@
       "- Due: " + (details.due || "Unknown"),
       "- Ticket URL: " + (details.url || "Unknown"),
       "",
-      "Latest comment/context:",
-      details.latestComment || "No comment snippet found.",
+      "AI Summary:",
+      details.aiSummary || "No AI summary found.",
+      "",
+      "Communication history (initial request + replies):",
+      details.communicationHistory || "No communication entries found.",
       "",
       "Output format:",
       "1) Quick understanding summary",
       "2) Most likely root causes",
       "3) Immediate next actions",
       "4) Draft response text",
-      "5) Follow-up questions"
+      "5) Follow-up questions",
+      "",
+      "Note for technician:",
+      "- This prompt was copied to clipboard by the userscript.",
+      "- Paste it in Copilot manually with Ctrl+V (or Cmd+V on macOS)."
     ].join("\n");
   }
 
@@ -197,13 +289,198 @@
     }
   }
 
-  function openCopilot() {
-    var url = "https://copilot.microsoft.com/";
+  function delay(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  function getShowMoreCommentLinks(includeProcessed) {
+    var links = document.querySelectorAll('a[data-remote="true"][href*="/comments/"]');
+    var out = [];
+
+    for (var i = 0; i < links.length; i++) {
+      var link = links[i];
+      var text = safeText(link).toLowerCase();
+      var looksLikeShowMore =
+        text.indexOf("show more") !== -1 ||
+        text.indexOf("load more") !== -1 ||
+        text.indexOf("older") !== -1;
+
+      if (!looksLikeShowMore) continue;
+      if (!includeProcessed && link.getAttribute("data-tm-expanded") === "1") continue;
+      out.push(link);
+    }
+
+    return out;
+  }
+
+  function waitForDomQuiet(root, quietMs, timeoutMs) {
+    root = root || document.body;
+    quietMs = quietMs || 350;
+    timeoutMs = timeoutMs || 5000;
+
+    return new Promise(function (resolve) {
+      var observer = null;
+      var done = false;
+      var quietTimer = null;
+
+      function finish() {
+        if (done) return;
+        done = true;
+        if (quietTimer) clearTimeout(quietTimer);
+        if (observer) observer.disconnect();
+        resolve();
+      }
+
+      function scheduleQuietFinish() {
+        if (quietTimer) clearTimeout(quietTimer);
+        quietTimer = setTimeout(finish, quietMs);
+      }
+
+      try {
+        observer = new MutationObserver(function () {
+          scheduleQuietFinish();
+        });
+        observer.observe(root, { childList: true, subtree: true, characterData: true });
+      } catch (err) {
+        // If observer setup fails for any reason, fall back to timeout.
+      }
+
+      scheduleQuietFinish();
+      setTimeout(finish, timeoutMs);
+    });
+  }
+
+  async function expandAllShowMoreComments() {
+    var maxIterations = 60;
+    var expandedCount = 0;
+
+    for (var i = 0; i < maxIterations; i++) {
+      var links = getShowMoreCommentLinks(false);
+      if (!links.length) break;
+
+      var link = links[0];
+      link.setAttribute("data-tm-expanded", "1");
+
+      try {
+        link.click();
+      } catch (err) {
+        try {
+          link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        } catch (err2) {}
+      }
+
+      expandedCount++;
+      await waitForDomQuiet(document.body, 350, 5000);
+      await delay(100);
+    }
+
+    return {
+      expandedCount: expandedCount,
+      remainingShowMoreCount: getShowMoreCommentLinks(false).length
+    };
+  }
+
+  function validateCopilotUrl(rawUrl) {
+    if (!rawUrl) return "";
+
+    var value = String(rawUrl).trim();
+    if (!value) return "";
+
+    try {
+      var parsed = new URL(value);
+      if (parsed.protocol !== "https:") return "";
+      if (!/m365\.cloud\.microsoft$/i.test(parsed.hostname)) return "";
+      if (parsed.pathname.toLowerCase().indexOf("/chat") !== 0) return "";
+      return parsed.toString();
+    } catch (err) {
+      return "";
+    }
+  }
+
+  function getStoredPreferredAgentUrl() {
+    try {
+      if (typeof GM_getValue === "function") {
+        return validateCopilotUrl(GM_getValue(AGENT_URL_STORAGE_KEY, ""));
+      }
+    } catch (err) {}
+
+    try {
+      return validateCopilotUrl(window.localStorage.getItem(AGENT_URL_STORAGE_KEY) || "");
+    } catch (err2) {
+      return "";
+    }
+  }
+
+  function setStoredPreferredAgentUrl(url) {
+    var safeUrl = validateCopilotUrl(url);
+    try {
+      if (typeof GM_setValue === "function") {
+        GM_setValue(AGENT_URL_STORAGE_KEY, safeUrl || "");
+      }
+    } catch (err) {}
+
+    try {
+      window.localStorage.setItem(AGENT_URL_STORAGE_KEY, safeUrl || "");
+    } catch (err2) {}
+
+    return safeUrl;
+  }
+
+  function promptForAgentUrl(currentValue) {
+    var entered = window.prompt(
+      "Optional: Enter your Copilot agent URL to save as your personal default. Leave blank to use standard chat URL.",
+      currentValue || ""
+    );
+
+    if (entered === null) return { cancelled: true, value: currentValue || "" };
+
+    var trimmed = String(entered || "").trim();
+    if (!trimmed) return { cancelled: false, value: "" };
+
+    var valid = validateCopilotUrl(trimmed);
+    if (!valid) {
+      window.alert("Invalid URL. Use an https://m365.cloud.microsoft/chat... URL.");
+      return { cancelled: true, value: currentValue || "" };
+    }
+
+    return { cancelled: false, value: valid };
+  }
+
+  function getPreferredCopilotUrl(options) {
+    options = options || {};
+
+    var stored = getStoredPreferredAgentUrl();
+    if (!stored && !options.skipPrompt) {
+      var selected = promptForAgentUrl("");
+      if (!selected.cancelled) {
+        stored = setStoredPreferredAgentUrl(selected.value);
+      }
+    }
+
+    if (options.forceConfigure) {
+      var current = stored || DEFAULT_COPILOT_CHAT_URL;
+      var configured = promptForAgentUrl(current);
+      if (configured.cancelled) return stored || DEFAULT_COPILOT_CHAT_URL;
+      stored = setStoredPreferredAgentUrl(configured.value);
+      if (!stored) {
+        showToast("Agent preference cleared. Using standard Copilot chat URL.", false);
+      } else {
+        showToast("Agent preference saved for this user/browser.", false);
+      }
+    }
+
+    return stored || DEFAULT_COPILOT_CHAT_URL;
+  }
+
+  function openCopilot(url) {
+    var targetUrl = validateCopilotUrl(url) || DEFAULT_COPILOT_CHAT_URL;
     try {
       if (typeof GM_openInTab === "function") {
-        GM_openInTab(url, { active: true, insert: true, setParent: true });
+        GM_openInTab(targetUrl, { active: true, insert: true, setParent: true });
       } else {
-        window.open(url, "_blank", "noopener,noreferrer");
+        window.open(targetUrl, "_blank", "noopener,noreferrer");
       }
       return true;
     } catch (err) {
@@ -240,6 +517,8 @@
   }
 
   function collectTicketDetails() {
+    var communicationEntries = getCommunicationEntries();
+
     return {
       ticketNumber: getTicketNumber(),
       subject: getTicketSubject(),
@@ -252,7 +531,8 @@
       phone: getPrimaryPhone(),
       created: getTicketField("Created"),
       due: getTicketField("Due Date"),
-      latestComment: getLatestCommentSnippet(),
+      aiSummary: findAiSummaryText(),
+      communicationHistory: formatCommunicationHistory(communicationEntries),
       url: window.location.href
     };
   }
@@ -268,19 +548,37 @@
     btn.type = "button";
     btn.className = "btn btn-default btn-xs";
     btn.textContent = "Copilot Assist";
-    btn.title = "Copy ticket context and open Copilot for response/diagnosis help";
+    btn.title = "Copy ticket context and open Copilot. Shift+Click: configure your saved agent URL.";
     btn.style.marginRight = "8px";
 
-    btn.addEventListener("click", function () {
+    btn.addEventListener("click", async function (event) {
+      if (event && event.shiftKey) {
+        getPreferredCopilotUrl({ forceConfigure: true, skipPrompt: true });
+        return;
+      }
+
       var mode = detectRequestType();
+
+      if (AUTO_EXPAND_SHOW_MORE_COMMENTS) {
+        showToast("Loading full comment history from any Show more links...", false);
+        var loadInfo = await expandAllShowMoreComments();
+        if (loadInfo.expandedCount > 0) {
+          showToast(
+            "Loaded " + loadInfo.expandedCount + " additional comment section(s). Building Copilot prompt now.",
+            false
+          );
+        }
+      }
+
       var details = collectTicketDetails();
       var prompt = buildPrompt(mode, details);
+      var copilotUrl = getPreferredCopilotUrl();
 
       var copied = copyText(prompt);
-      var opened = openCopilot();
+      var opened = openCopilot(copilotUrl);
 
       if (copied && opened) {
-        showToast("Ticket context copied. Copilot opened. Paste with Ctrl+V.", false);
+        showToast("Detailed ticket context copied. Copilot opened. Paste manually with Ctrl+V.", false);
         return;
       }
 
