@@ -156,6 +156,18 @@ Current scope:
 
 To enable additional Syncro tenant domains, add additional `@match` lines.
 
+## Credits
+
+- **Nick Fratangelo**: Original concept and initial build of this script. Original project: https://github.com/esperto/Syncro-TamperMonkey
+- **Gary Herbstman**: Expanded and optimized the script for internal staff workflows, while keeping features broadly useful for others.
+
+### Credit Details
+
+- Added reliability and performance optimizations for real-world ticket handling.
+- Implemented GitHub-based auto-update support via `@downloadURL` and `@updateURL` metadata.
+- Wrote and maintained full project documentation for installation, features, and update behavior.
+- Continued feature development to improve day-to-day technician efficiency.
+
 ## Development
 
 Repository files:

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Syncro – Duration Helper - Final
-// @homepageURL  https://github.com/esperto/Syncro-TamperMonkey
+// @homepageURL  https://github.com/gherbstman/SyncroTamperMonkey
 // @namespace    http://tampermonkey.net/
 // @version      2.7.1
 // @description  Add smart duration presets + ticket page efficiency tools (copy buttons, sticky header, priority/SLA hotkeys, WoC submit, canned response context menu)
@@ -8,6 +8,8 @@
 // @match        https://*.syncromsp.com/tickets/*
 // @match        https://*.shield.syncromsp.com/tickets/*
 // @grant        none
+// @downloadURL  https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroTickets.user.js
+// @updateURL    https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroTickets.user.js
 // ==/UserScript==
 
 (function () {
