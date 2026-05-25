@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syncro - Copilot Assist
 // @namespace    http://tampermonkey.net/
-// @version      1.2.3
+// @version      1.2.4
 // @description  Copy detailed Syncro ticket context into a Copilot-ready prompt (including AI summary and communication history) and open Copilot.
 // @author       Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
@@ -88,6 +88,32 @@
     }
 
     return "";
+  }
+
+  function getSelectedOptionText(selectEl) {
+    if (!selectEl || !selectEl.options || !selectEl.options.length) return "";
+
+    if (selectEl.selectedOptions && selectEl.selectedOptions.length) {
+      return safeText(selectEl.selectedOptions[0]);
+    }
+
+    if (selectEl.selectedIndex >= 0 && selectEl.options[selectEl.selectedIndex]) {
+      return safeText(selectEl.options[selectEl.selectedIndex]);
+    }
+
+    // Fallback for pages that mark selected in markup but don't expose selectedIndex reliably.
+    var explicit = selectEl.querySelector("option[selected], option[selected='selected']");
+    if (explicit) return safeText(explicit);
+
+    return "";
+  }
+
+  function getTicketStatus() {
+    var statusSelect = document.getElementById("ticket_status") || document.querySelector("select[name='ticket_status']");
+    var selectedText = getSelectedOptionText(statusSelect);
+    if (selectedText) return selectedText;
+
+    return getTicketField("Status");
   }
 
   function getCustomerField(labelText) {
@@ -563,7 +589,7 @@
     return {
       ticketNumber: getTicketNumber(),
       subject: getTicketSubject(),
-      status: getTicketField("Status"),
+      status: getTicketStatus(),
       priority: getTicketField("Priority"),
       assignee: getTicketField("Assignee"),
       customer: getCustomerName(),
