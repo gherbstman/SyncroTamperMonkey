@@ -211,18 +211,12 @@
     return parts.join("\n").trim();
   }
 
-  function detectRequestType() {
-    var choice = window.prompt(
-      "Copilot Assist mode:\nType 'r' for response draft, 'd' for diagnosis help, or leave blank for both.",
-      "both"
-    );
-
-    if (!choice) return "both";
-    var normalized = String(choice).trim().toLowerCase();
-
-    if (normalized === "r" || normalized === "response") return "response";
-    if (normalized === "d" || normalized === "diagnosis") return "diagnosis";
-    return "both";
+  function getAssistModeOptions() {
+    return [
+      { key: "both", label: "Both (Response + Diagnosis)" },
+      { key: "response", label: "Response Draft" },
+      { key: "diagnosis", label: "Diagnosis Help" }
+    ];
   }
 
   function buildPrompt(requestType, details) {
@@ -537,63 +531,129 @@
     };
   }
 
+  async function runAssistForMode(mode) {
+    if (AUTO_EXPAND_SHOW_MORE_COMMENTS) {
+      showToast("Loading full comment history from any Show more links...", false);
+      var loadInfo = await expandAllShowMoreComments();
+      if (loadInfo.expandedCount > 0) {
+        showToast(
+          "Loaded " + loadInfo.expandedCount + " additional comment section(s). Building Copilot prompt now.",
+          false
+        );
+      }
+    }
+
+    var details = collectTicketDetails();
+    var prompt = buildPrompt(mode, details);
+    var copilotUrl = getPreferredCopilotUrl();
+
+    var copied = copyText(prompt);
+    var opened = openCopilot(copilotUrl);
+
+    if (copied && opened) {
+      showToast("Detailed ticket context copied. Copilot opened. Paste manually with Ctrl+V.", false);
+      return;
+    }
+
+    if (copied && !opened) {
+      showToast("Ticket context copied, but Copilot window could not be opened automatically.", true);
+      return;
+    }
+
+    showToast("Could not copy ticket context automatically. Browser permission may be blocking clipboard access.", true);
+  }
+
   function addAssistButton() {
-    if (document.getElementById("tm-copilot-assist-btn")) return;
+    if (document.getElementById("tm-copilot-assist-wrap")) return;
 
     var targetBar = document.querySelector(".title-btns") || document.querySelector(".btn-bar");
     if (!targetBar) return;
+
+    var wrap = document.createElement("div");
+    wrap.id = "tm-copilot-assist-wrap";
+    wrap.style.position = "relative";
+    wrap.style.display = "inline-block";
+    wrap.style.marginRight = "8px";
 
     var btn = document.createElement("button");
     btn.id = "tm-copilot-assist-btn";
     btn.type = "button";
     btn.className = "btn btn-default btn-xs";
-    btn.textContent = "Copilot Assist";
-    btn.title = "Copy ticket context and open Copilot. Shift+Click: configure your saved agent URL.";
-    btn.style.marginRight = "8px";
+    btn.textContent = "Copilot Assist \u25be";
+    btn.title = "Select Copilot Assist mode. Shift+Click: configure your saved agent URL.";
+
+    var menu = document.createElement("div");
+    menu.id = "tm-copilot-assist-menu";
+    menu.style.position = "absolute";
+    menu.style.top = "100%";
+    menu.style.left = "0";
+    menu.style.minWidth = "230px";
+    menu.style.marginTop = "4px";
+    menu.style.padding = "4px";
+    menu.style.background = "#ffffff";
+    menu.style.border = "1px solid #d9dce3";
+    menu.style.borderRadius = "6px";
+    menu.style.boxShadow = "0 6px 18px rgba(0,0,0,0.18)";
+    menu.style.zIndex = "100080";
+    menu.style.display = "none";
+
+    function setMenuOpen(open) {
+      menu.style.display = open ? "block" : "none";
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
+    var modeOptions = getAssistModeOptions();
+    for (var i = 0; i < modeOptions.length; i++) {
+      (function (opt) {
+        var item = document.createElement("button");
+        item.type = "button";
+        item.className = "btn btn-default btn-xs";
+        item.textContent = opt.label;
+        item.style.display = "block";
+        item.style.width = "100%";
+        item.style.margin = "0";
+        item.style.marginBottom = i < modeOptions.length - 1 ? "4px" : "0";
+        item.style.textAlign = "left";
+        item.style.whiteSpace = "normal";
+        item.addEventListener("click", async function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          setMenuOpen(false);
+          await runAssistForMode(opt.key);
+        });
+        menu.appendChild(item);
+      })(modeOptions[i]);
+    }
 
     btn.addEventListener("click", async function (event) {
       if (event && event.shiftKey) {
+        setMenuOpen(false);
         getPreferredCopilotUrl({ forceConfigure: true, skipPrompt: true });
         return;
       }
 
-      var mode = detectRequestType();
-
-      if (AUTO_EXPAND_SHOW_MORE_COMMENTS) {
-        showToast("Loading full comment history from any Show more links...", false);
-        var loadInfo = await expandAllShowMoreComments();
-        if (loadInfo.expandedCount > 0) {
-          showToast(
-            "Loaded " + loadInfo.expandedCount + " additional comment section(s). Building Copilot prompt now.",
-            false
-          );
-        }
-      }
-
-      var details = collectTicketDetails();
-      var prompt = buildPrompt(mode, details);
-      var copilotUrl = getPreferredCopilotUrl();
-
-      var copied = copyText(prompt);
-      var opened = openCopilot(copilotUrl);
-
-      if (copied && opened) {
-        showToast("Detailed ticket context copied. Copilot opened. Paste manually with Ctrl+V.", false);
-        return;
-      }
-
-      if (copied && !opened) {
-        showToast("Ticket context copied, but Copilot window could not be opened automatically.", true);
-        return;
-      }
-
-      showToast("Could not copy ticket context automatically. Browser permission may be blocking clipboard access.", true);
+      event.preventDefault();
+      event.stopPropagation();
+      setMenuOpen(menu.style.display !== "block");
     });
 
+    document.addEventListener("click", function (event) {
+      if (!wrap.contains(event.target)) setMenuOpen(false);
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(menu);
+
     if (targetBar.firstElementChild) {
-      targetBar.insertBefore(btn, targetBar.firstElementChild);
+      targetBar.insertBefore(wrap, targetBar.firstElementChild);
     } else {
-      targetBar.appendChild(btn);
+      targetBar.appendChild(wrap);
     }
   }
 
