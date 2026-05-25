@@ -106,7 +106,11 @@ Option A: Install from GitHub raw URL
 2. Tampermonkey will detect and prompt to install.
 3. Approve installation.
 
-Example raw URL format:
+Direct install URL for this repository:
+
+`https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroTickets.user.js`
+
+Generic raw URL format:
 
 `https://raw.githubusercontent.com/<owner>/<repo>/<branch>/SyncroTickets.user.js`
 
@@ -128,11 +132,11 @@ Add these lines to the userscript metadata header (top of `SyncroTickets.user.js
 // @updateURL    https://raw.githubusercontent.com/<owner>/<repo>/<branch>/SyncroTickets.user.js
 ```
 
-Recommended for this repository homepage reference:
+Recommended for this repository:
 
 ```javascript
-// @downloadURL  https://raw.githubusercontent.com/esperto/Syncro-TamperMonkey/main/SyncroTickets.user.js
-// @updateURL    https://raw.githubusercontent.com/esperto/Syncro-TamperMonkey/main/SyncroTickets.user.js
+// @downloadURL  https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroTickets.user.js
+// @updateURL    https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroTickets.user.js
 ```
 
 If the repository uses `master` instead of `main`, replace `main` with `master`.
