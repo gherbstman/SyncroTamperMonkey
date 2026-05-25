@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syncro - Copilot Assist
 // @namespace    http://tampermonkey.net/
-// @version      1.2.1
+// @version      1.2.2
 // @description  Copy detailed Syncro ticket context into a Copilot-ready prompt (including AI summary and communication history) and open Copilot.
 // @author       Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
@@ -259,11 +259,7 @@
       "2) Most likely root causes",
       "3) Immediate next actions",
       "4) Draft response text",
-      "5) Follow-up questions",
-      "",
-      "Note for technician:",
-      "- This prompt was copied to clipboard by the userscript.",
-      "- Paste it in Copilot manually with Ctrl+V (or Cmd+V on macOS)."
+      "5) Follow-up questions"
     ].join("\n");
   }
 
