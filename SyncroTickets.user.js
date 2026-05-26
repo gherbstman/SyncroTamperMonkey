@@ -2,7 +2,7 @@
 // @name         Syncro – Ticket Helper
 // @homepageURL  https://github.com/gherbstman/SyncroTamperMonkey
 // @namespace    http://tampermonkey.net/
-// @version      2.8.2
+// @version      2.8.8
 // @description  Add smart duration presets + ticket page efficiency tools (copy buttons, sticky header, priority/SLA hotkeys, WoC submit, canned response context menu)
 // @author       Nick F + Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
@@ -18,6 +18,8 @@
   var nativeSetter =
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
   var widgetCacheByHeader = null;
+  var stickyRowsCache = null;  // cached parts from getStickyHeaderRows
+  var _stickyNavEls = null;    // cached navbar elements for calcTopOffset
 
   /* ═══════════════════ SHARED UTILITIES ═══════════════════ */
   function parse12h(str) {
@@ -150,17 +152,15 @@
     setTimeout(function () { btn.style.backgroundColor = old; }, 350);
   }
 
-  // Appendable CSS injector (supports multiple modules)
+  // CSS injector — each styleId maps to exactly one <style> block, injected once.
   function injectStyle(css, styleId) {
     styleId = styleId || "tm-extra-style";
-    var s = document.getElementById(styleId);
-    if (!s) {
-      s = document.createElement("style");
-      s.id = styleId;
-      s.type = "text/css";
-      document.head.appendChild(s);
-    }
-    if (!s.textContent.includes(css)) s.textContent += "\n" + css + "\n";
+    if (document.getElementById(styleId)) return;
+    var s = document.createElement("style");
+    s.id = styleId;
+    s.type = "text/css";
+    s.textContent = css;
+    document.head.appendChild(s);
   }
 
   function decodeHtmlEntities(s) {
@@ -1016,46 +1016,68 @@
     };
   }
 
+  // Returns the bottom edge (px) of the lowest fixed navbar so sticky rows start beneath it.
+  // Nav element references are cached — they never change during a page session.
+  function calcTopOffset() {
+    if (!_stickyNavEls) {
+      var found = ["nav.main-navbar", "nav.sub-navbar", "#section_header", "nav.navbar"]
+        .map(function (sel) { return document.querySelector(sel); })
+        .filter(Boolean);
+      if (found.length) _stickyNavEls = found;
+    }
+    if (!_stickyNavEls) return 0;
+    var maxBottom = 0;
+    for (var i = 0; i < _stickyNavEls.length; i++) {
+      var b = _stickyNavEls[i].getBoundingClientRect().bottom;
+      if (b > maxBottom) maxBottom = b;
+    }
+    return maxBottom;
+  }
+
+  function placeRow(row, topPx, widthPx) {
+    if (!row) return 0;
+    row.style.top = topPx + "px";
+    row.style.left = "0px";
+    row.style.width = Math.max(document.documentElement.clientWidth || widthPx || 0, 0) + "px";
+    row.style.right = "auto";
+    return row.getBoundingClientRect().height;
+  }
+
   function ensureStickyTicketHeaderRows() {
+    // Fast path: rows are still mounted — skip all setup and just refresh positions
+    if (stickyRowsCache && document.contains(stickyRowsCache.backRow)) {
+      if (typeof window.__tmStickyApplyLayout === "function") window.__tmStickyApplyLayout();
+      return;
+    }
+    stickyRowsCache = null;
+
     var parts = getStickyHeaderRows();
     if (!parts || !parts.backRow || !parts.titleRow || !parts.container) return;
+    stickyRowsCache = parts;
 
     injectStyle(`
       .tm-sticky-row {
         position: fixed !important;
-        z-index: 1030 !important;
+        z-index: 10 !important;
         background: #fff !important;
         box-sizing: border-box !important;
         margin-top: 0 !important;
         margin-bottom: 0 !important;
       }
       .tm-sticky-back-row {
-        z-index: 1035 !important;
+        z-index: 11 !important;
       }
       .tm-sticky-title-row {
-        z-index: 1040 !important;
-      }
-      .tm-sticky-subject-row {
-        z-index: 1038 !important;
-      }
-      .tm-sticky-title-row {
+        z-index: 12 !important;
         border-bottom: 1px solid #eceff4;
       }
       .tm-sticky-subject-row {
+        z-index: 11 !important;
         border-bottom: 1px solid #eceff4;
       }
       .tm-sticky-title-row .dropdown-menu,
       .tm-sticky-title-row .open > .dropdown-menu {
-        z-index: 1045 !important;
-      }
-      .tm-sticky-title-row.row,
-      .tm-sticky-subject-row.row,
-      .tm-sticky-back-row.row {
-        margin-top: 0 !important;
-        margin-bottom: 0 !important;
-      }
-      .tm-sticky-title-row + .tm-sticky-subject-row {
-        margin-top: 0 !important;
+        z-index: 13 !important;
       }
       #tm-sticky-header-spacer {
         width: 100%;
@@ -1091,33 +1113,19 @@
       }
     }
 
-    function calcTopOffset() {
-      var header = document.getElementById("section_header");
-      return header ? header.offsetHeight : 0;
-    }
-
-    function placeRow(row, topPx, leftPx, widthPx) {
-      if (!row) return 0;
-      row.style.top = topPx + "px";
-      row.style.left = "0px";
-      row.style.width = Math.max(document.documentElement.clientWidth || widthPx || 0, 0) + "px";
-      row.style.right = "auto";
-      return row.getBoundingClientRect().height;
-    }
-
     function applyLayout() {
       var containerRect = parts.container.getBoundingClientRect();
       if (!containerRect || !containerRect.width) return;
 
-      var top = calcTopOffset();
-      var left = containerRect.left;
+      var navBottom = calcTopOffset();
       var width = containerRect.width;
+      var top = navBottom;
 
-      top += placeRow(parts.backRow, top, left, width);
-      top += placeRow(parts.titleRow, top, left, width);
-      if (parts.subjectRow) top += placeRow(parts.subjectRow, top, left, width);
+      top += placeRow(parts.backRow, top, width);
+      top += placeRow(parts.titleRow, top, width);
+      if (parts.subjectRow) top += placeRow(parts.subjectRow, top, width);
 
-      if (spacer) spacer.style.height = (top - calcTopOffset() + 8) + "px";
+      if (spacer) spacer.style.height = (top - navBottom + 8) + "px";
     }
 
     function scheduleApplyLayout() {
