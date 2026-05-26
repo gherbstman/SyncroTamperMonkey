@@ -299,6 +299,18 @@ Repository files:
 - Ensure configured Copilot URLs follow `https://m365.cloud.microsoft/chat...`.
 - For canned responses, ensure the ticket comment subject value exactly matches the canned response matching subject.
 
-## Disclaimer
+## License and Disclaimer
+
+This project is released under the MIT License.
 
 This script is tailored to specific Syncro page structure and may need updates if Syncro changes its frontend markup or behavior.
+
+You are free to use, copy, modify, distribute, and reuse this code for personal, commercial, or internal projects, provided that the original copyright and license notice are included.
+
+This software is provided "as is", without warranty of any kind. The authors make no guarantees regarding its performance, reliability, or suitability for any particular purpose.
+
+By using this code, you assume all risk. The authors are not liable for any damages, data loss, service disruption, or other issues that may arise from its use.
+
+This project is intended as a practical enhancement to Syncro workflows and may require updates if Syncro changes its interface or behavior.
+
+Reuse of this code in other projects, scripts, or commercial tools is explicitly permitted and encouraged.
