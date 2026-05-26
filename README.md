@@ -1,4 +1,8 @@
 # Syncro Tickets Tampermonkey Helper
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Status: Active](https://img.shields.io/badge/Status-Active-blue)
+![Platform: Syncro](https://img.shields.io/badge/Platform-Syncro-orange)
+![Maintained](https://img.shields.io/badge/Maintained-Yes-brightgreen)
 
 Tampermonkey userscripts that improve day-to-day ticket handling in Syncro by adding faster time entry tools, copy helpers, sticky header behavior, comment workflow enhancements, and Copilot-ready ticket assist prompts.
 
@@ -9,7 +13,17 @@ These scripts enhance Syncro ticket pages for the Syncro tenant domains:
 - `https://*.syncromsp.com/tickets/*`
 - `https://*.shield.syncromsp.com/tickets/*`
 
-It is designed for technicians who work tickets all day and need fewer clicks for repetitive actions.
+This is intended for MSP technicians working Syncro tickets daily who want faster, keyboard-driven workflows and reduced repetitive actions.
+
+## Quick Start (2 minutes)
+
+1. Install Tampermonkey
+2. Install scripts:
+   - SyncroTickets.user.js
+   - SyncroCopilotAssist.user.js
+3. Open any Syncro ticket
+
+Done. The helper loads automatically.
 
 ## How It Works
 
@@ -299,6 +313,13 @@ Repository files:
 - Ensure configured Copilot URLs follow `https://m365.cloud.microsoft/chat...`.
 - For canned responses, ensure the ticket comment subject value exactly matches the canned response matching subject.
 
+## Important Scope Notes
+
+- This script runs locally in your browser only.
+- It does not interact with Syncro APIs or backend systems.
+- It does not transmit ticket data externally.
+- Behavior depends on Syncro’s frontend and may require updates if Syncro changes UI components.
+
 ## License and Disclaimer
 
 This project is released under the MIT License.
@@ -311,6 +332,17 @@ This software is provided "as is", without warranty of any kind. The authors mak
 
 By using this code, you assume all risk. The authors are not liable for any damages, data loss, service disruption, or other issues that may arise from its use.
 
-This project is intended as a practical enhancement to Syncro workflows and may require updates if Syncro changes its interface or behavior.
+This project may require updates if Syncro changes its interface or behavior.
 
 Reuse of this code in other projects, scripts, or commercial tools is explicitly permitted and encouraged.
+
+The MIT License (MIT)
+Copyright © 2026 <copyright Byte Solutions, Inc.>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
