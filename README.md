@@ -4,10 +4,10 @@
 ![Platform: Syncro](https://img.shields.io/badge/Platform-Syncro-orange)
 ![Maintained](https://img.shields.io/badge/Maintained-Yes-brightgreen)
 ![Release](https://img.shields.io/github/v/release/gherbstman/SyncroTamperMonkey)
-![Syncro Helper Logo](syncro-helper-logo.png)
+![Syncro Helper Logo](SyncroTicketsHelperLogo.png
 
 <p align="center">
-  <img src="assets/syncro-helper-logo.png" alt="Syncro Helper Logo" width="500">
+  <img src="" alt="SyncroTicketsHelperLogo.png
 </p>
 
 Tampermonkey userscripts that improve day-to-day ticket handling in Syncro by adding faster time entry tools, copy helpers, sticky header behavior, comment workflow enhancements, and Copilot-ready ticket assist prompts.
