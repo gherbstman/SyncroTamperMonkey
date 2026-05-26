@@ -2,7 +2,7 @@
 // @name         Syncro – Ticket Helper
 // @homepageURL  https://github.com/gherbstman/SyncroTamperMonkey
 // @namespace    http://tampermonkey.net/
-// @version      2.8.8
+// @version      2.8.9
 // @description  Add smart duration presets + ticket page efficiency tools (copy buttons, sticky header, priority/SLA hotkeys, WoC submit, canned response context menu)
 // @author       Nick F + Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
@@ -170,31 +170,83 @@
     return ta.value;
   }
 
+  function parseRgb(color) {
+    var m = String(color || "").match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if (!m) return null;
+    return { r: +m[1], g: +m[2], b: +m[3] };
+  }
+
+  function rgbToRgba(color, alpha) {
+    var rgb = parseRgb(color);
+    if (!rgb) return color || "rgba(0,0,0," + alpha + ")";
+    return "rgba(" + rgb.r + "," + rgb.g + "," + rgb.b + "," + alpha + ")";
+  }
+
+  function isDarkColor(color) {
+    var rgb = parseRgb(color);
+    if (!rgb) return false;
+    var lum = (rgb.r * 0.2126 + rgb.g * 0.7152 + rgb.b * 0.0722) / 255;
+    return lum < 0.5;
+  }
+
+  function getFirstOpaqueBackground(startEl) {
+    var el = startEl;
+    while (el && el !== document.documentElement) {
+      var bg = window.getComputedStyle(el).backgroundColor;
+      if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)" && bg !== "rgba(0,0,0,0)") {
+        return bg;
+      }
+      el = el.parentElement;
+    }
+    return "";
+  }
+
+  function getThemePalette(anchorEl) {
+    var fallbackAnchor =
+      anchorEl ||
+      document.querySelector("#main") ||
+      document.querySelector(".main-content") ||
+      document.body;
+
+    var style = window.getComputedStyle(fallbackAnchor);
+    var fg = style.color || "";
+    var bg = getFirstOpaqueBackground(fallbackAnchor) || style.backgroundColor || "";
+
+    if (!fg) fg = isDarkColor(bg) ? "rgb(232,236,243)" : "rgb(34,39,46)";
+    if (!bg) bg = isDarkColor(fg) ? "rgb(255,255,255)" : "rgb(31,36,44)";
+
+    var dark = isDarkColor(bg);
+
+    return {
+      fg: fg,
+      bg: bg,
+      border: dark ? "rgba(255,255,255,0.18)" : "#d9dce3",
+      panelBg: dark ? rgbToRgba(fg, 0.06) : "#f7f8fb",
+      inputBg: dark ? rgbToRgba(fg, 0.04) : "#ffffff",
+      buttonBg: dark ? rgbToRgba(fg, 0.10) : "#ffffff",
+      buttonHover: dark ? rgbToRgba(fg, 0.18) : "#eef2f7",
+      isDark: dark,
+    };
+  }
+
+  function applyStickyThemeVars(palette) {
+    if (!palette) return;
+    var root = document.documentElement;
+    root.style.setProperty("--tm-surface-bg", palette.bg);
+    root.style.setProperty("--tm-surface-fg", palette.fg);
+    root.style.setProperty("--tm-surface-border", palette.border);
+    root.style.setProperty("--tm-button-bg", palette.buttonBg);
+    root.style.setProperty("--tm-button-hover", palette.buttonHover);
+  }
+
   /* ═══════════════════ BAR BUILDER ═══════════════════ */
   function createBar(id) {
-    var pageStyles = window.getComputedStyle(document.body);
-    var fg = pageStyles.color || "#ddd";
-
-    function rgba(color, alpha) {
-      if (!color || !color.startsWith("rgb")) return color || "rgba(0,0,0," + alpha + ")";
-      var vals = color.match(/\d+/g);
-      if (!vals || vals.length < 3) return color;
-      return "rgba(" + vals[0] + "," + vals[1] + "," + vals[2] + "," + alpha + ")";
-    }
-
-    var isDark =
-      pageStyles.backgroundColor &&
-      pageStyles.backgroundColor.match(/\d+/g) &&
-      pageStyles.backgroundColor
-        .match(/\d+/g)
-        .slice(0, 3)
-        .map(Number)
-        .reduce(function (a, b) { return a + b; }, 0) / 3 < 128;
-
-    var subtleBg = isDark ? rgba(fg, 0.06) : "#f7f8fb";
-    var subtleBorder = isDark ? rgba(fg, 0.18) : "#d9dce3";
-    var buttonBg = isDark ? rgba(fg, 0.10) : "#ffffff";
-    var buttonHover = isDark ? rgba(fg, 0.18) : "#eef2f7";
+    var palette = getThemePalette(document.querySelector(".widget") || document.querySelector("#main") || document.body);
+    var fg = palette.fg;
+    var subtleBg = palette.panelBg;
+    var subtleBorder = palette.border;
+    var buttonBg = palette.buttonBg;
+    var buttonHover = palette.buttonHover;
 
     function makeEl(tag, attrs, text) {
       var el = document.createElement(tag);
@@ -286,7 +338,7 @@
         width: "170px",
         maxWidth: "100%",
         padding: "4px 8px",
-        background: isDark ? rgba(fg, 0.04) : "#ffffff",
+        background: palette.inputBg,
         color: fg,
         border: "1px solid " + subtleBorder,
         borderRadius: "4px",
@@ -298,9 +350,9 @@
 
     var applyBtn = themedButton("Apply", "tm-apply", {
       style: {
-        background: isDark ? "rgba(25,118,210,0.18)" : "#eaf2ff",
-        color: isDark ? fg : "#174ea6",
-        border: isDark ? "1px solid rgba(25,118,210,0.45)" : "1px solid #9bbcf2",
+        background: palette.isDark ? "rgba(25,118,210,0.18)" : "#eaf2ff",
+        color: palette.isDark ? fg : "#174ea6",
+        border: palette.isDark ? "1px solid rgba(25,118,210,0.45)" : "1px solid #9bbcf2",
         display: "none",
       },
     });
@@ -312,7 +364,7 @@
         className: "tm-now",
         style: {
           fontSize: "11px",
-          color: rgba(fg, 0.65),
+          color: rgbToRgba(fg, 0.65),
           whiteSpace: "nowrap",
           display: "none",
           paddingLeft: "4px",
@@ -1046,6 +1098,7 @@
   function ensureStickyTicketHeaderRows() {
     // Fast path: rows are still mounted — skip all setup and just refresh positions
     if (stickyRowsCache && document.contains(stickyRowsCache.backRow)) {
+      applyStickyThemeVars(getThemePalette(stickyRowsCache.container || stickyRowsCache.backRow));
       if (typeof window.__tmStickyApplyLayout === "function") window.__tmStickyApplyLayout();
       return;
     }
@@ -1054,12 +1107,14 @@
     var parts = getStickyHeaderRows();
     if (!parts || !parts.backRow || !parts.titleRow || !parts.container) return;
     stickyRowsCache = parts;
+    applyStickyThemeVars(getThemePalette(parts.container || parts.backRow));
 
     injectStyle(`
       .tm-sticky-row {
         position: fixed !important;
         z-index: 10 !important;
-        background: #fff !important;
+        background: var(--tm-surface-bg, #fff) !important;
+        color: var(--tm-surface-fg, inherit) !important;
         box-sizing: border-box !important;
         margin-top: 0 !important;
         margin-bottom: 0 !important;
@@ -1069,11 +1124,20 @@
       }
       .tm-sticky-title-row {
         z-index: 12 !important;
-        border-bottom: 1px solid #eceff4;
+        border-bottom: 1px solid var(--tm-surface-border, #eceff4);
       }
       .tm-sticky-subject-row {
         z-index: 11 !important;
-        border-bottom: 1px solid #eceff4;
+        border-bottom: 1px solid var(--tm-surface-border, #eceff4);
+      }
+      .tm-sticky-row .btn.btn-default {
+        background: var(--tm-button-bg, #fff) !important;
+        color: var(--tm-surface-fg, inherit) !important;
+        border-color: var(--tm-surface-border, #d9dce3) !important;
+      }
+      .tm-sticky-row .btn.btn-default:hover,
+      .tm-sticky-row .btn.btn-default:focus {
+        background: var(--tm-button-hover, #eef2f7) !important;
       }
       .tm-sticky-title-row .dropdown-menu,
       .tm-sticky-title-row .open > .dropdown-menu {
