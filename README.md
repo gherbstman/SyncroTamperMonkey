@@ -11,6 +11,21 @@ These scripts enhance Syncro ticket pages for the Syncro tenant domains:
 
 It is designed for technicians who work tickets all day and need fewer clicks for repetitive actions.
 
+## How It Works
+
+- The userscripts only load on Syncro ticket pages that match the `@match` rules in the script header.
+- The main ticket helper watches the page and injects its buttons, menus, and keyboard/mouse shortcuts when the relevant Syncro UI is present.
+- Most features work entirely in the browser against the current ticket page; there is no backend service or Syncro API setup required.
+- Copilot Assist stores only your preferred Copilot chat URL in your browser/Tampermonkey profile so each technician can keep their own preference.
+
+## How To Use It
+
+- Install the userscripts in Tampermonkey and open any Syncro ticket.
+- Use the added buttons in the ticket header for quick copy actions, sticky navigation, and status/comment workflow shortcuts.
+- Use the time helper fields and keyboard shortcuts directly in the ticket labor log or comment forms.
+- Right-click inside the comment editor to open the custom menu with standard editing actions and canned responses.
+- Use **Copilot Assist** when you want a structured prompt built from the ticket context and opened in Copilot.
+
 ## Features
 
 ### Time and Duration Helpers
@@ -150,6 +165,14 @@ URL requirements and validation:
 - Host must be `m365.cloud.microsoft`.
 - Path must begin with `/chat`.
 - Invalid URLs are rejected so technicians do not accidentally store malformed/non-Copilot links.
+
+### Feature Configuration Summary
+
+- No special setup is required for the main ticket helper beyond installing the userscript.
+- Sticky header, copy actions, duration helpers, and canned response tools are enabled automatically on supported ticket pages.
+- The only user-specific configuration in the current build is the Copilot Assist URL preference.
+- To change that preference, use **Shift+Click** on the **Copilot Assist** button and enter a new URL, or leave it blank to clear the saved value.
+- If your team uses a custom Copilot agent, save that agent's chat URL so the button opens directly into your preferred experience.
 
 ## Requirements
 
