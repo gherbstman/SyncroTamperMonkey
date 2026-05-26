@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="SyncroTicketsHelperLogo.png" alt="Syncro Tickets Helper Logo" width="600">
+</p>
+<br>
+
 # Syncro Tickets Tampermonkey Helper
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![Status: Active](https://img.shields.io/badge/Status-Active-blue)
