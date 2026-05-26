@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syncro - Copilot Assist
 // @namespace    http://tampermonkey.net/
-// @version      1.2.5
+// @version      1.2.6
 // @description  Copy detailed Syncro ticket context into a Copilot-ready prompt (including AI summary and communication history) and open Copilot.
 // @author       Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
@@ -670,7 +670,7 @@
     btn.type = "button";
     btn.className = "btn btn-default btn-xs";
     btn.textContent = "Copilot Assist \u25be";
-    btn.title = "Select Copilot Assist mode. Shift+Click: configure your saved agent URL.";
+    btn.title = "Select Copilot Assist mode or configure your saved agent URL from the menu.";
 
     var menu = document.createElement("div");
     menu.id = "tm-copilot-assist-menu";
@@ -715,13 +715,25 @@
       })(modeOptions[i]);
     }
 
-    btn.addEventListener("click", async function (event) {
-      if (event && event.shiftKey) {
-        setMenuOpen(false);
-        getPreferredCopilotUrl({ forceConfigure: true, skipPrompt: true });
-        return;
-      }
+    var urlItem = document.createElement("button");
+    urlItem.type = "button";
+    urlItem.className = "btn btn-default btn-xs";
+    urlItem.textContent = "Settings";
+    urlItem.style.display = "block";
+    urlItem.style.width = "100%";
+    urlItem.style.margin = "0";
+    urlItem.style.marginTop = "4px";
+    urlItem.style.textAlign = "left";
+    urlItem.style.whiteSpace = "normal";
+    urlItem.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      setMenuOpen(false);
+      getPreferredCopilotUrl({ forceConfigure: true, skipPrompt: true });
+    });
+    menu.appendChild(urlItem);
 
+    btn.addEventListener("click", async function (event) {
       event.preventDefault();
       event.stopPropagation();
       setMenuOpen(menu.style.display !== "block");
