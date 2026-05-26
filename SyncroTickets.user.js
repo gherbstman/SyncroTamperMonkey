@@ -2,7 +2,7 @@
 // @name         Syncro – Ticket Helper
 // @homepageURL  https://github.com/gherbstman/SyncroTamperMonkey
 // @namespace    http://tampermonkey.net/
-// @version      2.8.9
+// @version      2.8.10
 // @description  Add smart duration presets + ticket page efficiency tools (copy buttons, sticky header, priority/SLA hotkeys, WoC submit, canned response context menu)
 // @author       Nick F + Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
@@ -20,6 +20,7 @@
   var widgetCacheByHeader = null;
   var stickyRowsCache = null;  // cached parts from getStickyHeaderRows
   var _stickyNavEls = null;    // cached navbar elements for calcTopOffset
+  var lastThemeSignature = "";
 
   /* ═══════════════════ SHARED UTILITIES ═══════════════════ */
   function parse12h(str) {
@@ -237,6 +238,32 @@
     root.style.setProperty("--tm-surface-border", palette.border);
     root.style.setProperty("--tm-button-bg", palette.buttonBg);
     root.style.setProperty("--tm-button-hover", palette.buttonHover);
+  }
+
+  function getThemeSignature() {
+    var p = getThemePalette(document.querySelector("#main") || document.body);
+    return [p.bg, p.fg, p.border, p.buttonBg, p.buttonHover].join("|");
+  }
+
+  function refreshThemeSensitiveInjectedUi(force) {
+    var nextSig = getThemeSignature();
+    if (!force && nextSig === lastThemeSignature) return;
+    lastThemeSignature = nextSig;
+
+    // Sticky rows use CSS variables, so repaint by updating vars only.
+    applyStickyThemeVars(getThemePalette(document.querySelector("#main") || document.body));
+
+    // Duration bars have inline styles and hover handlers derived at creation time.
+    // Recreate them on theme change so they pick up the new palette.
+    var labor = document.getElementById("tm-laborlog-helper");
+    if (labor) labor.remove();
+
+    var comment = document.getElementById("tm-comment-helper");
+    if (comment) {
+      var commentRow = comment.closest(".row");
+      if (commentRow && commentRow.parentNode) commentRow.parentNode.removeChild(commentRow);
+      else comment.remove();
+    }
   }
 
   /* ═══════════════════ BAR BUILDER ═══════════════════ */
@@ -1098,7 +1125,7 @@
   function ensureStickyTicketHeaderRows() {
     // Fast path: rows are still mounted — skip all setup and just refresh positions
     if (stickyRowsCache && document.contains(stickyRowsCache.backRow)) {
-      applyStickyThemeVars(getThemePalette(stickyRowsCache.container || stickyRowsCache.backRow));
+      applyStickyThemeVars(getThemePalette(document.querySelector("#main") || document.body));
       if (typeof window.__tmStickyApplyLayout === "function") window.__tmStickyApplyLayout();
       return;
     }
@@ -1107,7 +1134,7 @@
     var parts = getStickyHeaderRows();
     if (!parts || !parts.backRow || !parts.titleRow || !parts.container) return;
     stickyRowsCache = parts;
-    applyStickyThemeVars(getThemePalette(parts.container || parts.backRow));
+    applyStickyThemeVars(getThemePalette(document.querySelector("#main") || document.body));
 
     injectStyle(`
       .tm-sticky-row {
@@ -1654,6 +1681,7 @@
 
   function runInjections() {
     beginInjectionCycleCache();
+    refreshThemeSensitiveInjectedUi(false);
     runInjectionStep("cleanupLaborLog", cleanupLaborLog);
     runInjectionStep("injectLaborLog", injectLaborLog);
     runInjectionStep("injectCommentForm", injectCommentForm);
@@ -1716,6 +1744,21 @@
   });
   observer.observe(getObservationRoot(), { childList: true, subtree: true });
 
+  var themeObserver = new MutationObserver(function () {
+    scheduleRunInjections();
+  });
+
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class", "style", "data-theme"],
+  });
+  if (document.body) {
+    themeObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme"],
+    });
+  }
+
   var pollCount = 0;
   var maxPollAttempts = 15;
   var pollInterval = setInterval(function () {
@@ -1732,6 +1775,7 @@
   }, 2000);
 
   window.addEventListener("load", scheduleRunInjections);
+  window.addEventListener("pageshow", function () { scheduleRunInjections(); });
   if (document.readyState === "complete" || document.readyState === "interactive") setTimeout(scheduleRunInjections, 0);
   else document.addEventListener("DOMContentLoaded", scheduleRunInjections);
 
