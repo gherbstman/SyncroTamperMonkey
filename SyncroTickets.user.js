@@ -2,7 +2,7 @@
 // @name         Syncro – Ticket Helper
 // @homepageURL  https://github.com/gherbstman/SyncroTamperMonkey
 // @namespace    http://tampermonkey.net/
-// @version      2.8.10
+// @version      2.8.11
 // @description  Add smart duration presets + ticket page efficiency tools (copy buttons, sticky header, priority/SLA hotkeys, WoC submit, canned response context menu)
 // @author       Nick F + Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
@@ -21,6 +21,7 @@
   var stickyRowsCache = null;  // cached parts from getStickyHeaderRows
   var _stickyNavEls = null;    // cached navbar elements for calcTopOffset
   var lastThemeSignature = "";
+  var _themeVarWriting = false;
 
   /* ═══════════════════ SHARED UTILITIES ═══════════════════ */
   function parse12h(str) {
@@ -233,11 +234,16 @@
   function applyStickyThemeVars(palette) {
     if (!palette) return;
     var root = document.documentElement;
-    root.style.setProperty("--tm-surface-bg", palette.bg);
-    root.style.setProperty("--tm-surface-fg", palette.fg);
-    root.style.setProperty("--tm-surface-border", palette.border);
-    root.style.setProperty("--tm-button-bg", palette.buttonBg);
-    root.style.setProperty("--tm-button-hover", palette.buttonHover);
+    _themeVarWriting = true;
+    try {
+      root.style.setProperty("--tm-surface-bg", palette.bg);
+      root.style.setProperty("--tm-surface-fg", palette.fg);
+      root.style.setProperty("--tm-surface-border", palette.border);
+      root.style.setProperty("--tm-button-bg", palette.buttonBg);
+      root.style.setProperty("--tm-button-hover", palette.buttonHover);
+    } finally {
+      _themeVarWriting = false;
+    }
   }
 
   function getThemeSignature() {
@@ -1281,17 +1287,22 @@
       topCopyGroup.style.marginLeft = "0";
       topCopyGroup.style.marginRight = "8px";
       topCopyGroup.style.flexWrap = "nowrap";
-      if (topActionButtonBar.firstElementChild) {
+      if (topActionButtonBar.firstElementChild && topActionButtonBar.firstElementChild !== topCopyGroup) {
         topActionButtonBar.insertBefore(topCopyGroup, topActionButtonBar.firstElementChild);
-      } else {
+      } else if (topCopyGroup.parentElement !== topActionButtonBar) {
         topActionButtonBar.appendChild(topCopyGroup);
       }
     }
 
-    if (!document.getElementById("tm-copy-url-top")) {
-      var btnUrl = createMiniButton("Copy URL", "Copy Ticket URL");
+    var btnUrl = document.getElementById("tm-copy-url-top");
+    if (!btnUrl) {
+      btnUrl = createMiniButton("Copy URL", "Copy Ticket URL");
       btnUrl.id = "tm-copy-url-top";
       btnUrl.classList.add("tm-inline-mini");
+      topCopyGroup.appendChild(btnUrl);
+    }
+    if (!btnUrl.__tmCopyBound) {
+      btnUrl.__tmCopyBound = true;
       btnUrl.addEventListener("click", async function () {
         var ticketUrl = (window.location.href || "").trim();
         if (!ticketUrl) {
@@ -1300,14 +1311,18 @@
         }
         flashButton(btnUrl, await copyToClipboard(ticketUrl));
       });
-      topCopyGroup.appendChild(btnUrl);
-      applyNativeTooltipBehavior(btnUrl, true);
     }
+    applyNativeTooltipBehavior(btnUrl, true);
 
-    if (!document.getElementById("tm-copy-tsu")) {
-      var btnTSU = createMiniButton("Copy TSU", "Copy Ticket # + Subject + URL");
+    var btnTSU = document.getElementById("tm-copy-tsu");
+    if (!btnTSU) {
+      btnTSU = createMiniButton("Copy TSU", "Copy Ticket # + Subject + URL");
       btnTSU.id = "tm-copy-tsu";
       btnTSU.classList.add("tm-inline-mini");
+      topCopyGroup.appendChild(btnTSU);
+    }
+    if (!btnTSU.__tmCopyBound) {
+      btnTSU.__tmCopyBound = true;
       btnTSU.addEventListener("click", async function () {
         var txt = ("TN: " + getTicketNumber() + " " + getTicketSubject() + " " + window.location.href).trim();
         if (!txt || txt === "TN:") {
@@ -1316,14 +1331,18 @@
         }
         flashButton(btnTSU, await copyToClipboard(txt));
       });
-      topCopyGroup.appendChild(btnTSU);
-      applyNativeTooltipBehavior(btnTSU, true);
     }
+    applyNativeTooltipBehavior(btnTSU, true);
 
-    if (!document.getElementById("tm-copy-details")) {
-      var btnDetails = createMiniButton("Copy Details", "Copy formatted ticket details");
+    var btnDetails = document.getElementById("tm-copy-details");
+    if (!btnDetails) {
+      btnDetails = createMiniButton("Copy Details", "Copy formatted ticket details");
       btnDetails.id = "tm-copy-details";
       btnDetails.classList.add("tm-inline-mini");
+      topCopyGroup.appendChild(btnDetails);
+    }
+    if (!btnDetails.__tmCopyBound) {
+      btnDetails.__tmCopyBound = true;
       btnDetails.addEventListener("click", async function () {
         var detailsText = (buildTicketSummaryText() || "").trim();
         if (!detailsText) {
@@ -1332,9 +1351,8 @@
         }
         flashButton(btnDetails, await copyToClipboard(detailsText));
       });
-      topCopyGroup.appendChild(btnDetails);
-      applyNativeTooltipBehavior(btnDetails, true);
     }
+    applyNativeTooltipBehavior(btnDetails, true);
 
     var actionButtonBar = topActionButtonBar;
     if (!actionButtonBar) return;
@@ -1745,6 +1763,7 @@
   observer.observe(getObservationRoot(), { childList: true, subtree: true });
 
   var themeObserver = new MutationObserver(function () {
+    if (_themeVarWriting) return;
     scheduleRunInjections();
   });
 
