@@ -14,7 +14,7 @@
 ![Maintained](https://img.shields.io/badge/Maintained-Yes-brightgreen)
 ![Release](https://img.shields.io/github/v/release/gherbstman/SyncroTamperMonkey)
 
-Tampermonkey userscripts that improve day-to-day ticket handling in Syncro by adding faster time entry tools, copy helpers, sticky header behavior, comment workflow enhancements, and Copilot-ready ticket assist prompts.
+Tampermonkey userscripts that improve day-to-day ticket handling in Syncro by adding faster time entry tools, copy helpers, sticky header behavior, comment workflow enhancements, and AI Assist workflows for both Copilot and Claude.
 
 ## What This Script Does
 
@@ -40,7 +40,7 @@ Done. The helper loads automatically.
 - The userscripts only load on Syncro ticket pages that match the `@match` rules in the script header.
 - The main ticket helper watches the page and injects its buttons, menus, and keyboard/mouse shortcuts when the relevant Syncro UI is present.
 - Most features work entirely in the browser against the current ticket page; there is no backend service or Syncro API setup required.
-- Copilot Assist stores only your preferred Copilot chat URL in your browser/Tampermonkey profile so each technician can keep their own preference.
+- AI Assist stores your preferences (Copilot URL, optional Claude API settings, and prompt templates) in your browser/Tampermonkey profile so each technician can keep their own configuration.
 
 ## How To Use It
 
@@ -48,7 +48,7 @@ Done. The helper loads automatically.
 - Use the added buttons in the ticket header for quick copy actions, sticky navigation, and status/comment workflow shortcuts.
 - Use the time helper fields and keyboard shortcuts directly in the ticket labor log or comment forms.
 - Right-click inside the comment editor to open the custom menu with standard editing actions and canned responses.
-- Use **Copilot Assist** when you want a structured prompt built from the ticket context and opened in Copilot.
+- Use **AI Assist** when you want a structured prompt built from ticket context for either Copilot or Claude.
 
 ## Features
 
@@ -146,57 +146,79 @@ Important behavior notes:
 - Per-cycle widget lookup cache to reduce repeated DOM scans
 - Empty-copy guards to avoid copying blank values
 
-### Copilot Assist (Separate Script)
+### AI Assist (Copilot + Claude, Separate Script)
 
-- Adds a **Copilot Assist** button to ticket pages
-- Collects key ticket context (ticket number, subject, status, priority, assignee, customer/contact info, latest comment snippet, link)
-- Builds a structured prompt for response drafting and diagnosis support
-- Copies the prompt to clipboard and opens Copilot in a new tab
-- Supports assist modes:
-  - Response draft
-  - Technical diagnosis
-  - Both
-- Supports a user-configurable Copilot URL (including custom agents)
-
-### Copilot Assist Usage and URL Configuration
-
-How to use Copilot Assist on a ticket:
-
-1. Click **Copilot Assist** in the ticket action bar.
-2. Choose a mode from the dropdown:
+- Adds an **AI Assist** menu button to ticket pages
+- Includes both provider sections in one menu:
+  - Copilot
+  - Claude
+- Collects rich ticket context:
+  - Ticket metadata (number, subject, status, priority, assignee)
+  - Customer and contact details
+  - AI summary (if present on page)
+  - Full communication history from loaded comments
+  - Direct ticket link
+- Auto-expands "Show more" comment links before building prompts (configurable constant)
+- Builds structured prompts for response drafting and diagnosis support
+- Supports built-in assist modes:
   - Both (Response + Diagnosis)
   - Response Draft
   - Diagnosis Help
-3. The script copies ticket context to clipboard and opens your configured Copilot URL in a new tab.
-4. Paste the prompt into Copilot with `Ctrl+V` (or `Cmd+V` on macOS).
+- Supports custom user-defined prompt modes that appear alongside built-in modes
 
-How to configure your Copilot URL:
+### Copilot Assist Behavior
 
-1. On the ticket page, **Shift+Click** the **Copilot Assist** button.
-2. Enter your preferred Copilot URL when prompted.
-3. Save to store the URL for your user/browser profile.
-4. Leave it blank to clear your preference and return to standard Copilot chat.
+- Copies the generated prompt to clipboard
+- Opens Copilot in a new tab
+- Supports user-configurable Copilot URL (including custom agents)
+- Validates saved URL to require:
+  - `https://`
+  - host ending in `m365.cloud.microsoft`
+  - path starting with `/chat`
 
-Recommended usage with custom agents:
+### Claude Assist Behavior
 
-- If your team has a custom Copilot agent, paste that agent's chat URL so Copilot Assist opens directly into your agent experience.
-- This is useful for role-specific workflows (helpdesk triage, incident response, escalation assistant, compliance response templates, etc.).
-- Each technician can store their own preferred URL independently on their own browser profile.
+- Uses Anthropic Messages API directly from the userscript (`api.anthropic.com`)
+- Shows an inline response panel in the ticket UI with loading, retry, and error states
+- Lets technicians copy:
+  - Claude response
+  - Raw prompt sent to Claude
+- Provides fallback actions if an API call fails:
+  - Open settings
+  - Copy prompt for manual paste
+  - Open `claude.ai`
 
-URL requirements and validation:
+### AI Assist Usage and Settings
 
-- URL must be HTTPS.
-- Host must be `m365.cloud.microsoft`.
-- Path must begin with `/chat`.
-- Invalid URLs are rejected so technicians do not accidentally store malformed/non-Copilot links.
+How to use AI Assist on a ticket:
+
+1. Click **AI Assist ▾** in the ticket action bar.
+2. Choose provider and mode (Copilot or Claude, then desired prompt mode).
+3. For Copilot:
+   - Prompt is copied and Copilot opens in a new tab.
+4. For Claude:
+   - Prompt is sent to Claude API and result appears in an on-page panel.
+
+How to configure AI Assist:
+
+1. Open **AI Assist ▾**.
+2. Click **Settings**.
+3. Configure any of the following:
+   - Copilot URL preference
+   - Claude API key
+   - Claude model and max tokens
+   - AI persona
+   - Per-mode rules/output format overrides
+   - Custom prompt modes
+4. Save settings.
 
 ### Feature Configuration Summary
 
 - No special setup is required for the main ticket helper beyond installing the userscript.
 - Sticky header, copy actions, duration helpers, and canned response tools are enabled automatically on supported ticket pages.
-- The only user-specific configuration in the current build is the Copilot Assist URL preference.
-- To change that preference, use **Shift+Click** on the **Copilot Assist** button and enter a new URL, or leave it blank to clear the saved value.
-- If your team uses a custom Copilot agent, save that agent's chat URL so the button opens directly into your preferred experience.
+- AI Assist includes optional per-user settings for both Copilot and Claude.
+- Use **AI Assist ▾ → Settings** to update provider preferences, prompt templates, and custom modes.
+- If your team uses a custom Copilot agent, save that agent's chat URL so Copilot opens directly into your preferred experience.
 
 ## Requirements
 
@@ -204,6 +226,7 @@ URL requirements and validation:
 - Tampermonkey browser extension
 - Access to the target Syncro tenant URLs
 - Permission to run userscripts in the browser
+- Optional for Claude Assist: Anthropic API key
 
 ## Installation
 
@@ -220,7 +243,7 @@ Install Tampermonkey from the browser extension store:
 This repository contains two userscripts:
 
 - `SyncroTickets.user.js` (main workflow helper)
-- `SyncroCopilotAssist.user.js` (Copilot context/prompt helper)
+- `SyncroCopilotAssist.user.js` (AI Assist menu for Copilot + Claude, settings, and prompt builder)
 
 Option A: Install from GitHub raw URL
 
@@ -308,9 +331,9 @@ To enable additional Syncro tenant domains, add additional `@match` lines.
 
 Repository files:
 
+- `README.md`: project documentation
 - `SyncroTickets.user.js`: main userscript
-- `SyncroCopilotAssist.user.js`: Copilot prompt builder and launcher helper
-- `view-source_https___bytesolutions.shield.syncromsp.com_tickets_110818582.html`: page source reference snapshot for selector debugging
+- `SyncroCopilotAssist.user.js`: AI Assist menu with Copilot + Claude support, prompt builder, and settings
 
 ## Troubleshooting
 
@@ -319,8 +342,10 @@ Repository files:
 - Confirm Tampermonkey script is enabled.
 - Check that URL matches one of the `@match` patterns.
 - For Copilot Assist, if Copilot does not open automatically, allow popups/new tabs for the site and try again.
-- For Copilot Assist URL issues, use **Shift+Click** on the Copilot Assist button to reconfigure the saved URL.
+- For Copilot URL issues, open **AI Assist ▾ → Settings** and reconfigure the saved URL.
 - Ensure configured Copilot URLs follow `https://m365.cloud.microsoft/chat...`.
+- For Claude errors, confirm API key, model, and token settings in **AI Assist ▾ → Settings**.
+- If Claude API calls fail, use the fallback button to copy the prompt and run it manually in `https://claude.ai`.
 - For canned responses, ensure the ticket comment subject value exactly matches the canned response matching subject.
 
 ## Important Scope Notes
