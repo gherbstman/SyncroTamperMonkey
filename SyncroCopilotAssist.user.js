@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Syncro - Copilot Assist
 // @namespace    http://tampermonkey.net/
-// @version      1.2.6
-// @description  Copy detailed Syncro ticket context into a Copilot-ready prompt (including AI summary and communication history) and open Copilot.
+// @version      1.5.0
+// @description  Copy Syncro ticket context for Copilot, or send directly to Claude API for inline analysis. Includes shared settings panel for both assistants.
 // @author       Gary Herbstman
 // @match        https://*.syncromsp.com/tickets/*
 // @match        https://*.shield.syncromsp.com/tickets/*
@@ -10,6 +10,8 @@
 // @grant        GM_openInTab
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_xmlhttpRequest
+// @connect      api.anthropic.com
 // @downloadURL  https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroCopilotAssist.user.js
 // @updateURL    https://raw.githubusercontent.com/gherbstman/SyncroTamperMonkey/main/SyncroCopilotAssist.user.js
 // ==/UserScript==
@@ -20,6 +22,31 @@
   var DEFAULT_COPILOT_CHAT_URL = "https://m365.cloud.microsoft/chat";
   var AGENT_URL_STORAGE_KEY = "tmCopilotPreferredAgentUrl";
   var AUTO_EXPAND_SHOW_MORE_COMMENTS = true;
+
+  /* ── Claude constants ── */
+  var CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
+  var CLAUDE_API_KEY_STORAGE_KEY  = "tmClaudeApiKey";
+  var CLAUDE_MODEL_STORAGE_KEY    = "tmClaudeModel";
+  var CLAUDE_MAX_TOKENS_STORAGE_KEY = "tmClaudeMaxTokens";
+  var CLAUDE_DEFAULT_MODEL      = "claude-haiku-4-5-20251001";
+  var CLAUDE_DEFAULT_MAX_TOKENS = 3000;
+  var CLAUDE_AVAILABLE_MODELS = [
+    { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (Fast / Low Cost)" },
+    { value: "claude-sonnet-4-6",         label: "Claude Sonnet 4.6 (Higher Quality)" }
+  ];
+
+
+  /* ── Prompt configuration constants ── */
+  var AI_PERSONA_STORAGE_KEY       = "tmAiPersona";
+  var AI_PROMPT_CONFIG_STORAGE_KEY = "tmAiPromptConfig";
+  var DEFAULT_PERSONA       = "You are assisting an MSP technician with a Syncro ticket.";
+  var DEFAULT_RULES         = "- Keep assumptions explicit.\n- If information is missing, list clarifying questions.\n- Keep recommendations practical and low-risk.\n- Use the communication history as the source of truth for chronology and context.";
+  var DEFAULT_OUTPUT_FORMAT = "1) Quick understanding summary\n2) Most likely root causes\n3) Immediate next actions\n4) Draft response text\n5) Follow-up questions";
+  var DEFAULT_TASK_LINES    = {
+    both:      "Provide both a customer-facing response and an internal diagnosis plan.",
+    response:  "Draft a customer-facing response for this ticket.",
+    diagnosis: "Provide a technical diagnosis and step-by-step remediation plan."
+  };
 
   function safeText(el) {
     return el ? String(el.textContent || "").replace(/\s+/g, " ").trim() : "";
@@ -306,41 +333,77 @@
   }
 
   function getAssistModeOptions() {
-    return [
-      { key: "both", label: "Both (Response + Diagnosis)" },
-      { key: "response", label: "Response Draft" },
+    var builtIn = [
+      { key: "both",      label: "Both (Response + Diagnosis)" },
+      { key: "response",  label: "Response Draft" },
       { key: "diagnosis", label: "Diagnosis Help" }
     ];
+    try {
+      var config = getStoredPromptConfig();
+      var custom = config.custom || [];
+      for (var i = 0; i < custom.length; i++) {
+        if (custom[i].key && custom[i].label) {
+          builtIn.push({
+            key: custom[i].key,
+            label: "\u2605 " + truncatePromptLabel(custom[i].label, 40),
+            title: custom[i].label
+          });
+        }
+      }
+    } catch (e) {}
+    return builtIn;
+  }
+
+  function truncatePromptLabel(label, maxChars) {
+    var text = String(label || "").trim();
+    var limit = typeof maxChars === "number" && maxChars > 0 ? maxChars : 40;
+    if (text.length <= limit) return text;
+    return text.slice(0, Math.max(0, limit - 1)).replace(/[\s\u00A0]+$/g, "") + "…";
   }
 
   function buildPrompt(requestType, details) {
-    var taskLine = "Provide both a customer-facing response and an internal diagnosis plan.";
-    if (requestType === "response") taskLine = "Draft a customer-facing response for this ticket.";
-    if (requestType === "diagnosis") taskLine = "Provide a technical diagnosis and step-by-step remediation plan.";
+    var persona = getStoredPersona() || DEFAULT_PERSONA;
+    var config  = getStoredPromptConfig();
+    var taskLine, rules, outputFormat;
 
-    return [
-      "You are assisting an MSP technician with a Syncro ticket.",
-      taskLine,
+    /* Check if requestType matches a custom prompt key */
+    var customList  = config.custom || [];
+    var customMatch = null;
+    for (var ci = 0; ci < customList.length; ci++) {
+      if (customList[ci].key === requestType) { customMatch = customList[ci]; break; }
+    }
+
+    if (customMatch) {
+      taskLine     = String(customMatch.taskLine     || "").trim();
+      rules        = String(customMatch.rules        || "").trim() || DEFAULT_RULES;
+      outputFormat = String(customMatch.outputFormat || "").trim() || DEFAULT_OUTPUT_FORMAT;
+    } else {
+      var modeConfig = (config.modes && config.modes[requestType]) || {};
+      taskLine     = DEFAULT_TASK_LINES[requestType] || "";
+      rules        = String(modeConfig.rules        || "").trim() || DEFAULT_RULES;
+      outputFormat = String(modeConfig.outputFormat || "").trim() || DEFAULT_OUTPUT_FORMAT;
+    }
+
+    var lines = [persona];
+    if (taskLine) lines.push(taskLine);
+    lines.push(
       "",
       "Rules:",
-      "- Keep assumptions explicit.",
-      "- If information is missing, list clarifying questions.",
-      "- Keep recommendations practical and low-risk.",
-      "- Use the communication history as the source of truth for chronology and context.",
+      rules,
       "",
       "Ticket details:",
       "- Ticket Number: " + (details.ticketNumber || "Unknown"),
-      "- Subject: " + (details.subject || "Unknown"),
-      "- Status: " + (details.status || "Unknown"),
-      "- Priority: " + (details.priority || "Unknown"),
-      "- Assignee: " + (details.assignee || "Unknown"),
-      "- Customer: " + (details.customer || "Unknown"),
-      "- Contact: " + (details.contact || "Unknown"),
-      "- Email: " + (details.email || "Unknown"),
-      "- Phone: " + (details.phone || "Unknown"),
-      "- Created: " + (details.created || "Unknown"),
-      "- Due: " + (details.due || "Unknown"),
-      "- Ticket URL: " + (details.url || "Unknown"),
+      "- Subject: "       + (details.subject       || "Unknown"),
+      "- Status: "        + (details.status         || "Unknown"),
+      "- Priority: "      + (details.priority       || "Unknown"),
+      "- Assignee: "      + (details.assignee       || "Unknown"),
+      "- Customer: "      + (details.customer       || "Unknown"),
+      "- Contact: "       + (details.contact        || "Unknown"),
+      "- Email: "         + (details.email          || "Unknown"),
+      "- Phone: "         + (details.phone          || "Unknown"),
+      "- Created: "       + (details.created        || "Unknown"),
+      "- Due: "           + (details.due            || "Unknown"),
+      "- Ticket URL: "    + (details.url            || "Unknown"),
       "",
       "AI Summary:",
       details.aiSummary || "No AI summary found.",
@@ -349,12 +412,9 @@
       details.communicationHistory || "No communication entries found.",
       "",
       "Output format:",
-      "1) Quick understanding summary",
-      "2) Most likely root causes",
-      "3) Immediate next actions",
-      "4) Draft response text",
-      "5) Follow-up questions"
-    ].join("\n");
+      outputFormat
+    );
+    return lines.join("\n");
   }
 
   function copyText(text) {
@@ -600,6 +660,906 @@
     }, 4200);
   }
 
+  /* ═══════════════════ CLAUDE STORAGE ═══════════════════ */
+
+  function getStoredClaudeApiKey() {
+    try {
+      if (typeof GM_getValue === "function") return GM_getValue(CLAUDE_API_KEY_STORAGE_KEY, "") || "";
+    } catch (e) {}
+    return "";
+  }
+
+  function setStoredClaudeApiKey(key) {
+    try {
+      if (typeof GM_setValue === "function") GM_setValue(CLAUDE_API_KEY_STORAGE_KEY, key || "");
+    } catch (e) {}
+  }
+
+  function getStoredClaudeModel() {
+    try {
+      if (typeof GM_getValue === "function") return GM_getValue(CLAUDE_MODEL_STORAGE_KEY, "") || CLAUDE_DEFAULT_MODEL;
+    } catch (e) {}
+    return CLAUDE_DEFAULT_MODEL;
+  }
+
+  function setStoredClaudeModel(model) {
+    try {
+      if (typeof GM_setValue === "function") GM_setValue(CLAUDE_MODEL_STORAGE_KEY, model || CLAUDE_DEFAULT_MODEL);
+    } catch (e) {}
+  }
+
+  function getStoredClaudeMaxTokens() {
+    try {
+      if (typeof GM_getValue === "function") {
+        var v = parseInt(GM_getValue(CLAUDE_MAX_TOKENS_STORAGE_KEY, "") || "", 10);
+        if (!isNaN(v) && v > 0) return v;
+      }
+    } catch (e) {}
+    return CLAUDE_DEFAULT_MAX_TOKENS;
+  }
+
+  function setStoredClaudeMaxTokens(tokens) {
+    try {
+      if (typeof GM_setValue === "function") GM_setValue(CLAUDE_MAX_TOKENS_STORAGE_KEY, String(tokens || CLAUDE_DEFAULT_MAX_TOKENS));
+    } catch (e) {}
+  }
+
+  /* ═══════════════════ PROMPT CONFIG STORAGE ═══════════════════ */
+
+  function getStoredPersona() {
+    try {
+      if (typeof GM_getValue === "function") return GM_getValue(AI_PERSONA_STORAGE_KEY, "") || "";
+    } catch (e) {}
+    return "";
+  }
+
+  function setStoredPersona(val) {
+    try {
+      if (typeof GM_setValue === "function") GM_setValue(AI_PERSONA_STORAGE_KEY, String(val || ""));
+    } catch (e) {}
+  }
+
+  function getStoredPromptConfig() {
+    try {
+      if (typeof GM_getValue === "function") {
+        var raw = GM_getValue(AI_PROMPT_CONFIG_STORAGE_KEY, "") || "";
+        if (raw) return JSON.parse(raw);
+      }
+    } catch (e) {}
+    return { modes: {}, custom: [] };
+  }
+
+  function setStoredPromptConfig(config) {
+    try {
+      if (typeof GM_setValue === "function") {
+        GM_setValue(AI_PROMPT_CONFIG_STORAGE_KEY, JSON.stringify(config || { modes: {}, custom: [] }));
+      }
+    } catch (e) {}
+  }
+
+  /* ═══════════════════ CLAUDE API CALL ═══════════════════ */
+
+  function callClaudeApi(prompt) {
+    var apiKey   = getStoredClaudeApiKey();
+    var model    = getStoredClaudeModel();
+    var maxTokens = getStoredClaudeMaxTokens();
+
+    return new Promise(function (resolve, reject) {
+      if (!apiKey) {
+        reject(new Error("No Claude API key configured. Open Settings to add your Anthropic API key."));
+        return;
+      }
+
+      GM_xmlhttpRequest({
+        method: "POST",
+        url: CLAUDE_API_URL,
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        data: JSON.stringify({
+          model: model,
+          max_tokens: maxTokens,
+          messages: [{ role: "user", content: prompt }]
+        }),
+        onload: function (response) {
+          try {
+            var data = JSON.parse(response.responseText);
+            if (response.status !== 200) {
+              var errMsg = (data.error && data.error.message) ? data.error.message : "HTTP " + response.status;
+              reject(new Error(errMsg));
+              return;
+            }
+            var text = "";
+            if (data.content && data.content.length > 0) {
+              for (var i = 0; i < data.content.length; i++) {
+                if (data.content[i].type === "text") text += data.content[i].text;
+              }
+            }
+            resolve(text || "(No response text returned)");
+          } catch (parseErr) {
+            reject(new Error("Failed to parse API response: " + parseErr.message));
+          }
+        },
+        onerror: function () {
+          reject(new Error("Network error contacting Claude API. Check your connection and try again."));
+        },
+        ontimeout: function () {
+          reject(new Error("Request to Claude API timed out. Please try again."));
+        },
+        timeout: 60000
+      });
+    });
+  }
+
+  /* ═══════════════════ CLAUDE PANEL UI ═══════════════════ */
+
+  function injectClaudePanelStyles() {
+    if (document.getElementById("tm-claude-styles")) return;
+    var style = document.createElement("style");
+    style.id = "tm-claude-styles";
+    style.textContent = [
+      "#tm-claude-overlay { position: fixed; inset: 0; z-index: 200000;",
+      "  background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; }",
+      "#tm-claude-panel { background: #fff; border-radius: 8px;",
+      "  box-shadow: 0 8px 32px rgba(0,0,0,0.28); width: min(820px, 94vw); max-height: 85vh;",
+      "  display: flex; flex-direction: column;",
+      "  font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; }",
+      "#tm-claude-panel-header { display: flex; align-items: center; justify-content: space-between;",
+      "  padding: 12px 16px; border-bottom: 1px solid #e0e0e0;",
+      "  background: #1a1a2e; border-radius: 8px 8px 0 0; }",
+      "#tm-claude-panel-header span { color: #fff; font-weight: 700; font-size: 14px; }",
+      "#tm-claude-panel-header-btns { display: flex; gap: 8px; }",
+      "#tm-claude-panel-header-btns button { padding: 4px 10px; border-radius: 4px;",
+      "  border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.1);",
+      "  color: #fff; cursor: pointer; font-size: 12px; font-weight: 500; }",
+      "#tm-claude-panel-header-btns button:hover { background: rgba(255,255,255,0.25); }",
+      "#tm-claude-panel-body { overflow-y: auto; padding: 16px 18px; flex: 1;",
+      "  white-space: pre-wrap; line-height: 1.6; color: #222; }",
+      "#tm-claude-panel-footer { padding: 10px 16px; border-top: 1px solid #e0e0e0;",
+      "  display: flex; gap: 8px; justify-content: flex-end;",
+      "  background: #f7f8fb; border-radius: 0 0 8px 8px; }",
+      "#tm-claude-panel-footer button { padding: 5px 14px; border-radius: 4px; cursor: pointer;",
+      "  border: 1px solid #c0c4cc; background: #fff; font-size: 12px; font-weight: 500; color: #333; }",
+      "#tm-claude-panel-footer button:hover { background: #eef2f7; }",
+      "#tm-claude-panel-footer .tm-claude-btn-primary { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }",
+      "#tm-claude-panel-footer .tm-claude-btn-primary:hover { background: #2d2d50; }",
+      ".tm-claude-loading { display: flex; flex-direction: column; align-items: center;",
+      "  justify-content: center; padding: 40px; gap: 12px; color: #555; }",
+      ".tm-claude-spinner { width: 32px; height: 32px; border: 3px solid #e0e0e0;",
+      "  border-top-color: #1a1a2e; border-radius: 50%; animation: tm-spin 0.8s linear infinite; }",
+      "@keyframes tm-spin { to { transform: rotate(360deg); } }",
+      ".tm-claude-error { color: #8b1e1e; padding: 12px; background: #fff5f5;",
+      "  border-radius: 6px; border: 1px solid #f5c6c6; }",
+      ".tm-claude-error-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }",
+      ".tm-claude-error-actions button { padding: 5px 12px; border-radius: 4px; cursor: pointer;",
+      "  border: 1px solid #c0c4cc; background: #fff; font-size: 12px; font-weight: 500; }"
+    ].join("\n");
+    document.head.appendChild(style);
+  }
+
+  function showClaudePanel(titleSuffix) {
+    injectClaudePanelStyles();
+    var existing = document.getElementById("tm-claude-overlay");
+    if (existing) existing.remove();
+
+    var overlay = document.createElement("div");
+    overlay.id = "tm-claude-overlay";
+
+    var panel = document.createElement("div");
+    panel.id = "tm-claude-panel";
+
+    var header = document.createElement("div");
+    header.id = "tm-claude-panel-header";
+
+    var title = document.createElement("span");
+    title.textContent = "Claude Assist" + (titleSuffix ? " \u2013 " + titleSuffix : "");
+
+    var headerBtns = document.createElement("div");
+    headerBtns.id = "tm-claude-panel-header-btns";
+
+    var closeBtn = document.createElement("button");
+    closeBtn.textContent = "Close";
+    closeBtn.addEventListener("click", function () { overlay.remove(); });
+    headerBtns.appendChild(closeBtn);
+    header.appendChild(title);
+    header.appendChild(headerBtns);
+
+    var body = document.createElement("div");
+    body.id = "tm-claude-panel-body";
+
+    var footer = document.createElement("div");
+    footer.id = "tm-claude-panel-footer";
+
+    var footerClose = document.createElement("button");
+    footerClose.textContent = "Close";
+    footerClose.addEventListener("click", function () { overlay.remove(); });
+    footer.appendChild(footerClose);
+
+    panel.appendChild(header);
+    panel.appendChild(body);
+    panel.appendChild(footer);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) overlay.remove(); });
+
+    function onEsc(e) {
+      if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onEsc); }
+    }
+    document.addEventListener("keydown", onEsc);
+
+    return { overlay: overlay, body: body, footer: footer, title: title };
+  }
+
+  function setClaudeLoading(body, message) {
+    body.innerHTML = "";
+    var wrap = document.createElement("div");
+    wrap.className = "tm-claude-loading";
+    var spinner = document.createElement("div");
+    spinner.className = "tm-claude-spinner";
+    var msg = document.createElement("span");
+    msg.textContent = message || "Asking Claude...";
+    wrap.appendChild(spinner);
+    wrap.appendChild(msg);
+    body.appendChild(wrap);
+  }
+
+  function setClaudeResult(body, footer, text, rawPrompt) {
+    body.innerHTML = "";
+    body.textContent = text;
+
+    var copyResponseBtn = document.createElement("button");
+    copyResponseBtn.textContent = "Copy Response";
+    copyResponseBtn.className = "tm-claude-btn-primary";
+    copyResponseBtn.addEventListener("click", function () {
+      try {
+        if (typeof GM_setClipboard === "function") GM_setClipboard(text, "text");
+        else navigator.clipboard.writeText(text);
+        copyResponseBtn.textContent = "Copied!";
+        setTimeout(function () { copyResponseBtn.textContent = "Copy Response"; }, 1800);
+      } catch (e) {}
+    });
+
+    var copyPromptBtn = document.createElement("button");
+    copyPromptBtn.textContent = "Copy Prompt";
+    copyPromptBtn.title = "Copy the raw prompt sent to Claude";
+    copyPromptBtn.addEventListener("click", function () {
+      try {
+        if (typeof GM_setClipboard === "function") GM_setClipboard(rawPrompt, "text");
+        else navigator.clipboard.writeText(rawPrompt);
+        copyPromptBtn.textContent = "Copied!";
+        setTimeout(function () { copyPromptBtn.textContent = "Copy Prompt"; }, 1800);
+      } catch (e) {}
+    });
+
+    footer.insertBefore(copyPromptBtn, footer.firstChild);
+    footer.insertBefore(copyResponseBtn, footer.firstChild);
+  }
+
+  function setClaudeError(body, footer, errorMessage, rawPrompt, onRetry) {
+    body.innerHTML = "";
+    var wrap = document.createElement("div");
+    wrap.className = "tm-claude-error";
+
+    var msg = document.createElement("div");
+    msg.textContent = "Error: " + errorMessage;
+
+    var actions = document.createElement("div");
+    actions.className = "tm-claude-error-actions";
+
+    if (typeof onRetry === "function") {
+      var retryBtn = document.createElement("button");
+      retryBtn.textContent = "Retry";
+      retryBtn.addEventListener("click", function () { onRetry(); });
+      actions.appendChild(retryBtn);
+    }
+
+    var settingsBtn = document.createElement("button");
+    settingsBtn.textContent = "Open Settings";
+    settingsBtn.addEventListener("click", function () { showSettingsModal(); });
+    actions.appendChild(settingsBtn);
+
+    var copyPromptBtn = document.createElement("button");
+    copyPromptBtn.textContent = "Copy Prompt (Fallback)";
+    copyPromptBtn.title = "Copy the prompt so you can paste it into Claude.ai manually";
+    copyPromptBtn.addEventListener("click", function () {
+      try {
+        if (typeof GM_setClipboard === "function") GM_setClipboard(rawPrompt, "text");
+        else navigator.clipboard.writeText(rawPrompt);
+        copyPromptBtn.textContent = "Copied!";
+        setTimeout(function () { copyPromptBtn.textContent = "Copy Prompt (Fallback)"; }, 1800);
+      } catch (e) {}
+    });
+    actions.appendChild(copyPromptBtn);
+
+    var openClaudeBtn = document.createElement("button");
+    openClaudeBtn.textContent = "Open Claude.ai";
+    openClaudeBtn.addEventListener("click", function () { window.open("https://claude.ai", "_blank", "noopener,noreferrer"); });
+    actions.appendChild(openClaudeBtn);
+
+    wrap.appendChild(msg);
+    wrap.appendChild(actions);
+    body.appendChild(wrap);
+  }
+
+  /* ═══════════════════ SETTINGS MODAL ═══════════════════ */
+
+  function showSettingsModal() {
+    var existing = document.getElementById("tm-settings-overlay");
+    if (existing) existing.remove();
+
+    if (!document.getElementById("tm-settings-styles")) {
+      var style = document.createElement("style");
+      style.id = "tm-settings-styles";
+      style.textContent = [
+        "#tm-settings-overlay { position: fixed; inset: 0; z-index: 300000;",
+        "  background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; }",
+        "#tm-settings-panel { background: #fff; border-radius: 8px;",
+        "  box-shadow: 0 8px 32px rgba(0,0,0,0.3); width: min(520px, 94vw);",
+        "  font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; display: flex; flex-direction: column; }",
+        "#tm-settings-header { display: flex; align-items: center; justify-content: space-between;",
+        "  padding: 12px 16px; background: #1f4f1f; border-radius: 8px 8px 0 0; }",
+        "#tm-settings-header span { color: #fff; font-weight: 700; font-size: 14px; }",
+        "#tm-settings-header button { background: rgba(255,255,255,0.15);",
+        "  border: 1px solid rgba(255,255,255,0.3); color: #fff; border-radius: 4px;",
+        "  cursor: pointer; padding: 3px 9px; font-size: 12px; }",
+        "#tm-settings-body { padding: 16px 18px; overflow-y: auto; max-height: 70vh; }",
+        ".tm-settings-section { margin-bottom: 18px; }",
+        ".tm-settings-section-title { font-weight: 700; font-size: 11px; text-transform: uppercase;",
+        "  letter-spacing: 0.05em; color: #555; margin-bottom: 10px; padding-bottom: 4px;",
+        "  border-bottom: 1px solid #e0e0e0; }",
+        ".tm-settings-field { margin-bottom: 12px; }",
+        ".tm-settings-field label { display: block; font-weight: 600; margin-bottom: 4px;",
+        "  color: #333; font-size: 12px; }",
+        ".tm-settings-field input, .tm-settings-field select { width: 100%; padding: 6px 8px;",
+        "  border: 1px solid #c0c4cc; border-radius: 4px; font-size: 12px; box-sizing: border-box; }",
+        ".tm-settings-hint { font-size: 11px; color: #777; margin-top: 3px; }",
+        "#tm-settings-footer { padding: 10px 16px; border-top: 1px solid #e0e0e0;",
+        "  display: flex; gap: 8px; justify-content: flex-end;",
+        "  background: #f7f8fb; border-radius: 0 0 8px 8px; }",
+        "#tm-settings-footer button { padding: 6px 16px; border-radius: 4px; cursor: pointer;",
+        "  border: 1px solid #c0c4cc; background: #fff; font-size: 12px; font-weight: 500; color: #333; }",
+        "#tm-settings-footer .tm-settings-save { background: #1f4f1f; color: #fff; border-color: #1f4f1f; }",
+        "#tm-settings-footer .tm-settings-save:hover { background: #2a6b2a; }",
+        ".tm-settings-textarea { width: 100%; padding: 6px 8px; border: 1px solid #c0c4cc; border-radius: 4px; font-size: 12px; box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; resize: vertical; }",
+        ".tm-settings-reset { font-size: 11px; color: #1f4f1f; cursor: pointer; text-decoration: underline; margin-top: 3px; display: inline-block; }",
+        ".tm-settings-tabs { display: flex; gap: 2px; margin-bottom: -1px; flex-wrap: wrap; }",
+        ".tm-settings-tab { padding: 5px 12px; border: 1px solid #c0c4cc; border-radius: 4px 4px 0 0; background: #f0f0f0; cursor: pointer; font-size: 12px; font-weight: 500; color: #555; border-bottom: none; }",
+        ".tm-settings-tab.tm-tab-active { background: #fff; color: #1f4f1f; font-weight: 700; }",
+        ".tm-settings-tab-pane { display: none; border: 1px solid #c0c4cc; border-radius: 0 4px 4px 4px; padding: 12px; background: #fff; }",
+        ".tm-settings-tab-pane.tm-pane-active { display: block; }",
+        ".tm-custom-prompt-list { max-height: 240px; overflow-y: auto; padding-right: 2px; }",
+        ".tm-custom-prompt-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid #e0e0e0; border-radius: 4px; margin-bottom: 6px; background: #f9f9f9; }",
+        ".tm-custom-prompt-row span { font-size: 12px; font-weight: 600; color: #333; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
+        ".tm-cp-actions { display: flex; gap: 4px; flex-shrink: 0; }",
+        ".tm-cp-actions button { padding: 2px 8px; font-size: 11px; border-radius: 3px; border: 1px solid #c0c4cc; background: #fff; cursor: pointer; }"
+      ].join("\n");
+      document.head.appendChild(style);
+    }
+
+    var overlay = document.createElement("div");
+    overlay.id = "tm-settings-overlay";
+
+    var panel = document.createElement("div");
+    panel.id = "tm-settings-panel";
+
+    /* Header */
+    var header = document.createElement("div");
+    header.id = "tm-settings-header";
+    var headerTitle = document.createElement("span");
+    headerTitle.textContent = "Copilot & Claude Assist \u2014 Settings";
+    var headerClose = document.createElement("button");
+    headerClose.textContent = "\u2715";
+    headerClose.addEventListener("click", function () { overlay.remove(); });
+    header.appendChild(headerTitle);
+    header.appendChild(headerClose);
+
+    /* Body */
+    var body = document.createElement("div");
+    body.id = "tm-settings-body";
+
+    /* ── Copilot section ── */
+    function makeSection(titleText) {
+      var sec = document.createElement("div");
+      sec.className = "tm-settings-section";
+      var t = document.createElement("div");
+      t.className = "tm-settings-section-title";
+      t.textContent = titleText;
+      sec.appendChild(t);
+      return sec;
+    }
+
+    function makeField(labelText, inputEl, hintText) {
+      var field = document.createElement("div");
+      field.className = "tm-settings-field";
+      var lbl = document.createElement("label");
+      lbl.textContent = labelText;
+      field.appendChild(lbl);
+      field.appendChild(inputEl);
+      if (hintText) {
+        var hint = document.createElement("div");
+        hint.className = "tm-settings-hint";
+        hint.textContent = hintText;
+        field.appendChild(hint);
+      }
+      return field;
+    }
+
+    var copilotSection = makeSection("Copilot Settings");
+
+    var agentUrlInput = document.createElement("input");
+    agentUrlInput.type = "url";
+    agentUrlInput.placeholder = DEFAULT_COPILOT_CHAT_URL;
+    agentUrlInput.value = getStoredPreferredAgentUrl() || "";
+    copilotSection.appendChild(makeField(
+      "Agent URL",
+      agentUrlInput,
+      "Optional. Must be https://m365.cloud.microsoft/chat\u2026 — leave blank to use standard chat."
+    ));
+    body.appendChild(copilotSection);
+
+    /* ── Claude section ── */
+    var claudeSection = makeSection("Claude Settings");
+
+    var apiKeyInput = document.createElement("input");
+    apiKeyInput.type = "password";
+    apiKeyInput.placeholder = "sk-ant-\u2026";
+    apiKeyInput.value = getStoredClaudeApiKey() || "";
+    claudeSection.appendChild(makeField(
+      "Anthropic API Key",
+      apiKeyInput,
+      "Stored securely in Tampermonkey. Get your key at console.anthropic.com."
+    ));
+
+    var modelSelect = document.createElement("select");
+    var currentModel = getStoredClaudeModel();
+    for (var mi = 0; mi < CLAUDE_AVAILABLE_MODELS.length; mi++) {
+      var modelOpt = document.createElement("option");
+      modelOpt.value = CLAUDE_AVAILABLE_MODELS[mi].value;
+      modelOpt.textContent = CLAUDE_AVAILABLE_MODELS[mi].label;
+      if (CLAUDE_AVAILABLE_MODELS[mi].value === currentModel) modelOpt.selected = true;
+      modelSelect.appendChild(modelOpt);
+    }
+    claudeSection.appendChild(makeField(
+      "Model",
+      modelSelect,
+      "Haiku is faster and cheaper; Sonnet provides higher-quality responses."
+    ));
+
+    var maxTokensInput = document.createElement("input");
+    maxTokensInput.type = "number";
+    maxTokensInput.min = "256";
+    maxTokensInput.max = "8192";
+    maxTokensInput.step = "256";
+    maxTokensInput.value = String(getStoredClaudeMaxTokens());
+    claudeSection.appendChild(makeField(
+      "Max Response Tokens",
+      maxTokensInput,
+      "Length of Claude\u2019s response. Higher = longer output and more cost. Default: 3000."
+    ));
+    body.appendChild(claudeSection);
+
+    /* ── Prompt Configuration section ── */
+    var promptSection = makeSection("Prompt Configuration");
+
+    /* Persona */
+    var personaTextarea = document.createElement("textarea");
+    personaTextarea.rows = 2;
+    personaTextarea.className = "tm-settings-textarea";
+    personaTextarea.placeholder = DEFAULT_PERSONA;
+    personaTextarea.value = getStoredPersona() || "";
+    var personaReset = document.createElement("span");
+    personaReset.className = "tm-settings-reset";
+    personaReset.textContent = "Reset to default";
+    personaReset.addEventListener("click", function () { personaTextarea.value = DEFAULT_PERSONA; });
+    var personaField = makeField(
+      "AI Persona / System Context",
+      personaTextarea,
+      "Opening line of every prompt sent to any AI. Leave blank to use the default."
+    );
+    personaField.appendChild(personaReset);
+    promptSection.appendChild(personaField);
+
+    /* Mode Templates — tabbed */
+    var tabBar = document.createElement("div");
+    tabBar.className = "tm-settings-tabs";
+    var tabPanesContainer = document.createElement("div");
+    tabPanesContainer.style.marginBottom = "8px";
+
+    var modeTemplatesLbl = document.createElement("label");
+    modeTemplatesLbl.textContent = "Mode Templates";
+    modeTemplatesLbl.style.display = "block";
+    modeTemplatesLbl.style.marginBottom = "4px";
+    modeTemplatesLbl.style.marginTop = "10px";
+    var modeTemplatesHint = document.createElement("div");
+    modeTemplatesHint.className = "tm-settings-hint";
+    modeTemplatesHint.textContent = "Customise the Rules and Output Format for each built-in mode. Leave blank to use the defaults.";
+    modeTemplatesHint.style.marginBottom = "6px";
+    promptSection.appendChild(modeTemplatesLbl);
+    promptSection.appendChild(modeTemplatesHint);
+
+    var BUILTIN_MODES = [
+      { key: "both",      label: "Both" },
+      { key: "response",  label: "Response" },
+      { key: "diagnosis", label: "Diagnosis" }
+    ];
+    var storedModes  = (getStoredPromptConfig().modes) || {};
+    var modeTextareas = {};
+
+    for (var mti = 0; mti < BUILTIN_MODES.length; mti++) {
+      (function (m, isFirst) {
+        var tabBtn = document.createElement("button");
+        tabBtn.type = "button";
+        tabBtn.textContent = m.label;
+        tabBtn.className = "tm-settings-tab" + (isFirst ? " tm-tab-active" : "");
+
+        var pane = document.createElement("div");
+        pane.className = "tm-settings-tab-pane" + (isFirst ? " tm-pane-active" : "");
+
+        /* Rules */
+        var rulesEl = document.createElement("textarea");
+        rulesEl.rows = 5;
+        rulesEl.className = "tm-settings-textarea";
+        rulesEl.placeholder = DEFAULT_RULES;
+        rulesEl.value = (storedModes[m.key] && storedModes[m.key].rules) || "";
+        var rulesReset = document.createElement("span");
+        rulesReset.className = "tm-settings-reset";
+        rulesReset.textContent = "Reset to default";
+        (function (el) {
+          rulesReset.addEventListener("click", function () { el.value = ""; });
+        })(rulesEl);
+        var rulesField = makeField("Rules", rulesEl, "Override the default rules for this mode. Leave blank to use the defaults.");
+        rulesField.appendChild(rulesReset);
+        pane.appendChild(rulesField);
+
+        /* Output Format */
+        var outputEl = document.createElement("textarea");
+        outputEl.rows = 5;
+        outputEl.className = "tm-settings-textarea";
+        outputEl.placeholder = DEFAULT_OUTPUT_FORMAT;
+        outputEl.value = (storedModes[m.key] && storedModes[m.key].outputFormat) || "";
+        var outputReset = document.createElement("span");
+        outputReset.className = "tm-settings-reset";
+        outputReset.textContent = "Reset to default";
+        (function (el) {
+          outputReset.addEventListener("click", function () { el.value = ""; });
+        })(outputEl);
+        var outputField = makeField("Output Format", outputEl, "Override the default output format for this mode. Leave blank to use the defaults.");
+        outputField.appendChild(outputReset);
+        pane.appendChild(outputField);
+
+        modeTextareas[m.key] = { rules: rulesEl, outputFormat: outputEl };
+
+        tabBtn.addEventListener("click", function () {
+          var allTabs  = tabBar.querySelectorAll(".tm-settings-tab");
+          var allPanes = tabPanesContainer.querySelectorAll(".tm-settings-tab-pane");
+          for (var ti = 0; ti < allTabs.length; ti++)  allTabs[ti].className  = "tm-settings-tab";
+          for (var pi = 0; pi < allPanes.length; pi++) allPanes[pi].className = "tm-settings-tab-pane";
+          tabBtn.className = "tm-settings-tab tm-tab-active";
+          pane.className   = "tm-settings-tab-pane tm-pane-active";
+        });
+
+        tabBar.appendChild(tabBtn);
+        tabPanesContainer.appendChild(pane);
+      })(BUILTIN_MODES[mti], mti === 0);
+    }
+    promptSection.appendChild(tabBar);
+    promptSection.appendChild(tabPanesContainer);
+
+    /* Custom Prompts */
+    var customLabelEl = document.createElement("label");
+    customLabelEl.textContent = "Custom Prompts";
+    customLabelEl.style.display = "block";
+    customLabelEl.style.marginTop = "14px";
+    customLabelEl.style.marginBottom = "4px";
+    var customHintEl = document.createElement("div");
+    customHintEl.className = "tm-settings-hint";
+    customHintEl.textContent = "Define additional prompt types that appear in the AI Assist menu alongside the built-in modes.";
+    customHintEl.style.marginBottom = "6px";
+    promptSection.appendChild(customLabelEl);
+    promptSection.appendChild(customHintEl);
+
+    var customListEl = document.createElement("div");
+    customListEl.className = "tm-custom-prompt-list";
+
+    var customEditArea = document.createElement("div");
+    customEditArea.style.display      = "none";
+    customEditArea.style.border       = "1px solid #c0c4cc";
+    customEditArea.style.borderRadius = "4px";
+    customEditArea.style.padding      = "12px";
+    customEditArea.style.marginTop    = "8px";
+    customEditArea.style.background   = "#f9fffe";
+
+    var ceEditingKey = null;
+
+    function renderCustomList() {
+      customListEl.innerHTML = "";
+      var cfg    = getStoredPromptConfig();
+      var cpList = cfg.custom || [];
+      if (!cpList.length) {
+        var emptyEl = document.createElement("div");
+        emptyEl.style.fontSize = "12px";
+        emptyEl.style.color    = "#999";
+        emptyEl.style.padding  = "4px 0";
+        emptyEl.textContent = "No custom prompts yet.";
+        customListEl.appendChild(emptyEl);
+        return;
+      }
+      for (var cpi = 0; cpi < cpList.length; cpi++) {
+        (function (p) {
+          var row       = document.createElement("div");
+          row.className = "tm-custom-prompt-row";
+          var nameSpan  = document.createElement("span");
+          nameSpan.textContent = truncatePromptLabel(p.label, 40);
+          nameSpan.title = p.label;
+          var acts = document.createElement("div");
+          acts.className = "tm-cp-actions";
+          var editBtn = document.createElement("button");
+          editBtn.textContent = "Edit";
+          editBtn.addEventListener("click", function () { showCustomEditForm(p.key); });
+          var delBtn = document.createElement("button");
+          delBtn.textContent = "Delete";
+          delBtn.style.color = "#8b1e1e";
+          delBtn.addEventListener("click", function () {
+            var c = getStoredPromptConfig();
+            c.custom = (c.custom || []).filter(function (x) { return x.key !== p.key; });
+            setStoredPromptConfig(c);
+            renderCustomList();
+            document.dispatchEvent(new CustomEvent("tm-ai-assist-prompts-changed"));
+          });
+          acts.appendChild(editBtn);
+          acts.appendChild(delBtn);
+          row.appendChild(nameSpan);
+          row.appendChild(acts);
+          customListEl.appendChild(row);
+        })(cpList[cpi]);
+      }
+    }
+
+    /* Edit-form fields */
+    var ceTitle = document.createElement("div");
+    ceTitle.style.fontWeight   = "700";
+    ceTitle.style.fontSize     = "12px";
+    ceTitle.style.marginBottom = "10px";
+    ceTitle.style.color        = "#333";
+
+    var ceLabelInput = document.createElement("input");
+    ceLabelInput.type        = "text";
+    ceLabelInput.placeholder = "e.g. Manager Summary";
+    ceLabelInput.style.cssText = "width:100%;padding:6px 8px;border:1px solid #c0c4cc;border-radius:4px;font-size:12px;box-sizing:border-box;";
+
+    var ceTaskInput = document.createElement("textarea");
+    ceTaskInput.rows      = 2;
+    ceTaskInput.className = "tm-settings-textarea";
+    ceTaskInput.placeholder = "e.g. Summarise this ticket concisely for a non-technical manager.";
+
+    var ceRulesInput = document.createElement("textarea");
+    ceRulesInput.rows      = 4;
+    ceRulesInput.className = "tm-settings-textarea";
+    ceRulesInput.placeholder = "(Leave blank to use default rules)";
+
+    var ceOutputInput = document.createElement("textarea");
+    ceOutputInput.rows      = 4;
+    ceOutputInput.className = "tm-settings-textarea";
+    ceOutputInput.placeholder = "(Leave blank to use default output format)";
+
+    var ceSaveBtn   = document.createElement("button");
+    ceSaveBtn.type  = "button";
+    ceSaveBtn.className   = "btn btn-default btn-xs";
+    ceSaveBtn.textContent = "Save Prompt";
+
+    var ceCancelBtn   = document.createElement("button");
+    ceCancelBtn.type  = "button";
+    ceCancelBtn.className   = "btn btn-default btn-xs";
+    ceCancelBtn.textContent = "Cancel";
+    ceCancelBtn.addEventListener("click", function () {
+      customEditArea.style.display = "none";
+      ceEditingKey = null;
+    });
+
+    ceSaveBtn.addEventListener("click", function () {
+      var lbl = String(ceLabelInput.value || "").trim();
+      if (!lbl) { ceLabelInput.style.borderColor = "#c0392b"; ceLabelInput.focus(); return; }
+      var c   = getStoredPromptConfig();
+      c.custom = c.custom || [];
+      var key   = ceEditingKey || ("cp_" + Date.now());
+      var entry = {
+        key:          key,
+        label:        lbl,
+        taskLine:     String(ceTaskInput.value   || "").trim(),
+        rules:        String(ceRulesInput.value  || "").trim(),
+        outputFormat: String(ceOutputInput.value || "").trim()
+      };
+      var found = false;
+      for (var ei = 0; ei < c.custom.length; ei++) {
+        if (c.custom[ei].key === key) { c.custom[ei] = entry; found = true; break; }
+      }
+      if (!found) c.custom.push(entry);
+      setStoredPromptConfig(c);
+      ceEditingKey = null;
+      customEditArea.style.display = "none";
+      renderCustomList();
+      document.dispatchEvent(new CustomEvent("tm-ai-assist-prompts-changed"));
+    });
+
+    function showCustomEditForm(key) {
+      ceEditingKey = key || null;
+      var c = getStoredPromptConfig();
+      var p = null;
+      if (key) {
+        for (var si = 0; si < (c.custom || []).length; si++) {
+          if (c.custom[si].key === key) { p = c.custom[si]; break; }
+        }
+      }
+      ceTitle.textContent        = p ? "Edit Prompt: " + p.label : "New Custom Prompt";
+      ceLabelInput.value         = p ? (p.label        || "") : "";
+      ceTaskInput.value          = p ? (p.taskLine      || "") : "";
+      ceRulesInput.value         = p ? (p.rules         || "") : "";
+      ceOutputInput.value        = p ? (p.outputFormat  || "") : "";
+      ceLabelInput.style.borderColor = "";
+      customEditArea.style.display = "block";
+      customEditArea.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    customEditArea.appendChild(ceTitle);
+    customEditArea.appendChild(makeField("Name",                       ceLabelInput,  "Label shown in the AI Assist menu."));
+    customEditArea.appendChild(makeField("Task Instruction",           ceTaskInput,   "The goal/instruction that follows the persona in the prompt."));
+    customEditArea.appendChild(makeField("Rules (optional)",           ceRulesInput,  "Leave blank to use the default rules."));
+    customEditArea.appendChild(makeField("Output Format (optional)",   ceOutputInput, "Leave blank to use the default output format."));
+    var ceBtnsDiv = document.createElement("div");
+    ceBtnsDiv.style.cssText = "display:flex;gap:6px;margin-top:8px;";
+    ceBtnsDiv.appendChild(ceSaveBtn);
+    ceBtnsDiv.appendChild(ceCancelBtn);
+    customEditArea.appendChild(ceBtnsDiv);
+
+    var addCustomBtn = document.createElement("button");
+    addCustomBtn.type      = "button";
+    addCustomBtn.className = "btn btn-default btn-xs";
+    addCustomBtn.textContent = "+ Add Custom Prompt";
+    addCustomBtn.style.marginTop = "8px";
+    addCustomBtn.addEventListener("click", function () { showCustomEditForm(null); });
+
+    renderCustomList();
+    promptSection.appendChild(customListEl);
+    promptSection.appendChild(customEditArea);
+    promptSection.appendChild(addCustomBtn);
+
+    body.appendChild(promptSection);
+
+    /* Footer */
+    var footer = document.createElement("div");
+    footer.id = "tm-settings-footer";
+
+    var cancelBtn = document.createElement("button");
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", function () { overlay.remove(); });
+
+    var saveBtn = document.createElement("button");
+    saveBtn.textContent = "Save Settings";
+    saveBtn.className = "tm-settings-save";
+    saveBtn.addEventListener("click", function () {
+      /* Validate & save Copilot URL */
+      var rawUrl = String(agentUrlInput.value || "").trim();
+      if (rawUrl) {
+        var validUrl = validateCopilotUrl(rawUrl);
+        if (!validUrl) {
+          agentUrlInput.style.borderColor = "#c0392b";
+          agentUrlInput.focus();
+          showToast("Invalid Copilot URL. Must be https://m365.cloud.microsoft/chat\u2026", true);
+          return;
+        }
+        setStoredPreferredAgentUrl(validUrl);
+      } else {
+        setStoredPreferredAgentUrl("");
+      }
+
+      /* Validate & save Claude API key */
+      var rawKey = String(apiKeyInput.value || "").trim();
+      if (rawKey && !rawKey.startsWith("sk-")) {
+        apiKeyInput.style.borderColor = "#c0392b";
+        apiKeyInput.focus();
+        showToast("API key must start with 'sk-'. Please check your Anthropic key.", true);
+        return;
+      }
+      setStoredClaudeApiKey(rawKey);
+
+      /* Save model */
+      setStoredClaudeModel(modelSelect.value);
+
+      /* Save max tokens */
+      var tokens = parseInt(maxTokensInput.value, 10);
+      if (isNaN(tokens) || tokens < 256) tokens = CLAUDE_DEFAULT_MAX_TOKENS;
+      setStoredClaudeMaxTokens(tokens);
+
+      /* Save persona */
+      setStoredPersona(String(personaTextarea.value || "").trim());
+
+      /* Save mode template overrides */
+      var promptCfg = getStoredPromptConfig();
+      promptCfg.modes = promptCfg.modes || {};
+      var bmKeys = ["both", "response", "diagnosis"];
+      for (var bmk = 0; bmk < bmKeys.length; bmk++) {
+        var bk = bmKeys[bmk];
+        if (modeTextareas[bk]) {
+          promptCfg.modes[bk] = {
+            rules:        String(modeTextareas[bk].rules.value        || "").trim(),
+            outputFormat: String(modeTextareas[bk].outputFormat.value || "").trim()
+          };
+        }
+      }
+      setStoredPromptConfig(promptCfg);
+
+      overlay.remove();
+      showToast("Settings saved.", false);
+    });
+
+    footer.appendChild(cancelBtn);
+    footer.appendChild(saveBtn);
+
+    panel.appendChild(header);
+    panel.appendChild(body);
+    panel.appendChild(footer);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) overlay.remove(); });
+
+    function onEsc(e) {
+      if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onEsc); }
+    }
+    document.addEventListener("keydown", onEsc);
+  }
+
+  /* ═══════════════════ CLAUDE MAIN FLOW ═══════════════════ */
+
+  var CLAUDE_MODE_LABELS = {
+    both:      "Both (Response + Diagnosis)",
+    response:  "Response Draft",
+    diagnosis: "Diagnosis Help"
+  };
+
+  async function runClaudeAssist(mode) {
+    if (!getStoredClaudeApiKey()) {
+      showToast("No Claude API key configured. Opening Settings\u2026", true);
+      showSettingsModal();
+      return;
+    }
+
+    var panelParts = showClaudePanel(CLAUDE_MODE_LABELS[mode] || mode);
+
+    if (AUTO_EXPAND_SHOW_MORE_COMMENTS) {
+      setClaudeLoading(panelParts.body, "Expanding comment history\u2026");
+      var expandInfo = await expandAllShowMoreComments();
+      if (expandInfo.expandedCount > 0) {
+        showToast("Loaded " + expandInfo.expandedCount + " additional comment section(s).", false);
+      }
+    }
+
+    setClaudeLoading(panelParts.body, "Building prompt and asking Claude\u2026");
+
+    var details = collectTicketDetails();
+    var prompt  = buildPrompt(mode, details);
+
+    function doApiCall() {
+      setClaudeLoading(panelParts.body, "Waiting for Claude response\u2026");
+      callClaudeApi(prompt).then(function (responseText) {
+        setClaudeResult(panelParts.body, panelParts.footer, responseText, prompt);
+      }).catch(function (err) {
+        setClaudeError(
+          panelParts.body,
+          panelParts.footer,
+          err.message || "Unknown error",
+          prompt,
+          function () { doApiCall(); }
+        );
+      });
+    }
+
+    doApiCall();
+  }
+
   function collectTicketDetails() {
     var communicationEntries = getCommunicationEntries();
 
@@ -635,7 +1595,7 @@
 
     var details = collectTicketDetails();
     var prompt = buildPrompt(mode, details);
-    var copilotUrl = getPreferredCopilotUrl();
+    var copilotUrl = getStoredPreferredAgentUrl() || DEFAULT_COPILOT_CHAT_URL;
 
     var copied = copyText(prompt);
     var opened = openCopilot(copilotUrl);
@@ -654,32 +1614,32 @@
   }
 
   function addAssistButton() {
-    if (document.getElementById("tm-copilot-assist-wrap")) return;
+    if (document.getElementById("tm-ai-assist-wrap")) return;
 
     var targetBar = document.querySelector(".title-btns") || document.querySelector(".btn-bar");
     if (!targetBar) return;
 
     var wrap = document.createElement("div");
-    wrap.id = "tm-copilot-assist-wrap";
+    wrap.id = "tm-ai-assist-wrap";
     wrap.style.position = "relative";
     wrap.style.display = "inline-block";
     wrap.style.marginRight = "8px";
 
     var btn = document.createElement("button");
-    btn.id = "tm-copilot-assist-btn";
+    btn.id = "tm-ai-assist-btn";
     btn.type = "button";
     btn.className = "btn btn-default btn-xs";
-    btn.textContent = "Copilot Assist \u25be";
-    btn.title = "Select Copilot Assist mode or configure your saved agent URL from the menu.";
+    btn.textContent = "AI Assist \u25be";
+    btn.title = "Open AI Assist menu for Copilot or Claude options.";
 
     var menu = document.createElement("div");
-    menu.id = "tm-copilot-assist-menu";
+    menu.id = "tm-ai-assist-menu";
     menu.style.position = "absolute";
     menu.style.top = "100%";
     menu.style.left = "0";
-    menu.style.minWidth = "230px";
+    menu.style.minWidth = "260px";
     menu.style.marginTop = "4px";
-    menu.style.padding = "4px";
+    menu.style.padding = "6px";
     menu.style.background = "#ffffff";
     menu.style.border = "1px solid #d9dce3";
     menu.style.borderRadius = "6px";
@@ -692,50 +1652,93 @@
       btn.setAttribute("aria-expanded", open ? "true" : "false");
     }
 
-    var modeOptions = getAssistModeOptions();
-    for (var i = 0; i < modeOptions.length; i++) {
-      (function (opt) {
-        var item = document.createElement("button");
-        item.type = "button";
-        item.className = "btn btn-default btn-xs";
-        item.textContent = opt.label;
-        item.style.display = "block";
-        item.style.width = "100%";
-        item.style.margin = "0";
-        item.style.marginBottom = i < modeOptions.length - 1 ? "4px" : "0";
-        item.style.textAlign = "left";
-        item.style.whiteSpace = "normal";
-        item.addEventListener("click", async function (event) {
-          event.preventDefault();
-          event.stopPropagation();
-          setMenuOpen(false);
-          await runAssistForMode(opt.key);
-        });
-        menu.appendChild(item);
-      })(modeOptions[i]);
+    function makeSectionLabel(text) {
+      var lbl = document.createElement("div");
+      lbl.textContent = text;
+      lbl.style.fontSize = "10px";
+      lbl.style.fontWeight = "700";
+      lbl.style.textTransform = "uppercase";
+      lbl.style.letterSpacing = "0.06em";
+      lbl.style.color = "#888";
+      lbl.style.padding = "4px 6px 3px";
+      return lbl;
     }
 
-    var urlItem = document.createElement("button");
-    urlItem.type = "button";
-    urlItem.className = "btn btn-default btn-xs";
-    urlItem.textContent = "Settings";
-    urlItem.style.display = "block";
-    urlItem.style.width = "100%";
-    urlItem.style.margin = "0";
-    urlItem.style.marginTop = "4px";
-    urlItem.style.textAlign = "left";
-    urlItem.style.whiteSpace = "normal";
-    urlItem.addEventListener("click", function (event) {
-      event.preventDefault();
-      event.stopPropagation();
-      setMenuOpen(false);
-      getPreferredCopilotUrl({ forceConfigure: true, skipPrompt: true });
-    });
-    menu.appendChild(urlItem);
+    function makeDivider() {
+      var hr = document.createElement("hr");
+      hr.style.margin = "5px 0";
+      hr.style.border = "none";
+      hr.style.borderTop = "1px solid #e8e8e8";
+      return hr;
+    }
 
-    btn.addEventListener("click", async function (event) {
+    function makeMenuItem(labelText, onClick) {
+      var item = document.createElement("button");
+      item.type = "button";
+      item.className = "btn btn-default btn-xs";
+      item.textContent = labelText;
+      item.style.display = "block";
+      item.style.width = "100%";
+      item.style.margin = "0 0 3px 0";
+      item.style.textAlign = "left";
+      item.style.whiteSpace = "normal";
+      item.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        setMenuOpen(false);
+        onClick();
+      });
+      return item;
+    }
+
+    function rebuildMenu() {
+      var modeOptions = getAssistModeOptions();
+      menu.innerHTML = "";
+
+      /* ── Copilot section ── */
+      menu.appendChild(makeSectionLabel("Copilot"));
+      for (var i = 0; i < modeOptions.length; i++) {
+        (function (opt) {
+          var item = makeMenuItem(opt.label, async function () {
+            await runAssistForMode(opt.key);
+          });
+          if (opt.title) item.title = opt.title;
+          menu.appendChild(item);
+        })(modeOptions[i]);
+      }
+
+      menu.appendChild(makeDivider());
+
+      /* ── Claude section ── */
+      menu.appendChild(makeSectionLabel("Claude"));
+      for (var ci = 0; ci < modeOptions.length; ci++) {
+        (function (opt) {
+          var item = makeMenuItem(opt.label, async function () {
+            await runClaudeAssist(opt.key);
+          });
+          if (opt.title) item.title = opt.title;
+          menu.appendChild(item);
+        })(modeOptions[ci]);
+      }
+
+      menu.appendChild(makeDivider());
+
+      /* ── Settings ── */
+      menu.appendChild(makeMenuItem("\u2699\ufe0f Settings", function () {
+        showSettingsModal();
+      }));
+    }
+
+    rebuildMenu();
+
+    document.addEventListener("tm-ai-assist-prompts-changed", function () {
+      if (document.getElementById("tm-ai-assist-wrap")) rebuildMenu();
+    });
+
+    btn.addEventListener("click", function (event) {
       event.preventDefault();
       event.stopPropagation();
+      rebuildMenu();
       setMenuOpen(menu.style.display !== "block");
     });
 
@@ -744,9 +1747,7 @@
     });
 
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") {
-        setMenuOpen(false);
-      }
+      if (event.key === "Escape") setMenuOpen(false);
     });
 
     wrap.appendChild(btn);
