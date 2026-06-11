@@ -146,12 +146,11 @@ Important behavior notes:
 - Per-cycle widget lookup cache to reduce repeated DOM scans
 - Empty-copy guards to avoid copying blank values
 
-### AI Assist (Copilot + Claude, Separate Script)
+### AI Assist (Copilot + Claude, Separate Script) — v1.6
 
 - Adds an **AI Assist** menu button to ticket pages
-- Includes both provider sections in one menu:
-  - Copilot
-  - Claude
+- Provider sections (Copilot and Claude) are shown only when their respective component is enabled in Settings
+- If both are disabled, the menu shows a notice with a direct link to Settings
 - Collects rich ticket context:
   - Ticket metadata (number, subject, status, priority, assignee)
   - Customer and contact details
@@ -165,6 +164,16 @@ Important behavior notes:
   - Response Draft
   - Diagnosis Help
 - Supports custom user-defined prompt modes that appear alongside built-in modes
+- Prompts now open with the **ticket subject** as the first line so chat history titles reflect the ticket, not the persona string
+
+### Pre-Send Output Selection (v1.6)
+
+Before sending to Copilot or Claude, a selection modal appears that lets you:
+
+- **Choose which output sections to include** for this specific request using checkboxes
+- Each output item shows its label and defaults to checked or unchecked based on per-item default settings
+- Add **additional one-off guidance** in a free-text box that gets incorporated into the prompt for that request only
+- Cancel the request from the modal without sending anything
 
 ### Copilot Assist Behavior
 
@@ -188,15 +197,16 @@ Important behavior notes:
   - Copy prompt for manual paste
   - Open `claude.ai`
 
-### AI Assist Usage and Settings
+### AI Assist Settings (v1.6)
 
 How to use AI Assist on a ticket:
 
 1. Click **AI Assist ▾** in the ticket action bar.
 2. Choose provider and mode (Copilot or Claude, then desired prompt mode).
-3. For Copilot:
+3. The output selection modal opens — choose output sections and optionally add guidance.
+4. For Copilot:
    - Prompt is copied and Copilot opens in a new tab.
-4. For Claude:
+5. For Claude:
    - Prompt is sent to Claude API and result appears in an on-page panel.
 
 How to configure AI Assist:
@@ -204,21 +214,45 @@ How to configure AI Assist:
 1. Open **AI Assist ▾**.
 2. Click **Settings**.
 3. Configure any of the following:
+   - **AI Assist Components** — enable or disable the Copilot and Claude provider sections independently
    - Copilot URL preference
-   - Claude API key
-   - Claude model and max tokens
+   - Claude API key, model, and max tokens
    - AI persona
-   - Per-mode rules/output format overrides
-   - Custom prompt modes
+   - Per-mode output format items (up to 10 items per mode, each with its own default on/off setting)
+   - Per-mode rules overrides
+   - Custom prompt modes with their own output items and rules
+   - **Restore Default Output Items For All Modes** — preset button that resets all built-in and custom prompt output items back to the original 5 defaults
 4. Save settings.
+
+### Output Format Items (v1.6)
+
+Output format is now managed as a list of individual items rather than a single text block:
+
+- Each mode (Both, Response, Diagnosis) and each custom prompt has its own list of up to 10 output items
+- Each item has a label and a **Default on** toggle that controls whether it is pre-checked in the pre-send modal
+- Items can be added, reordered by editing, and removed individually in Settings
+- The **Restore Default Output Items For All Modes** button resets all modes and custom prompts to the original 5 defaults at once
+- Existing saved output format text from v1.5 is automatically migrated to the item list on first load
 
 ### Feature Configuration Summary
 
 - No special setup is required for the main ticket helper beyond installing the userscript.
 - Sticky header, copy actions, duration helpers, and canned response tools are enabled automatically on supported ticket pages.
 - AI Assist includes optional per-user settings for both Copilot and Claude.
-- Use **AI Assist ▾ → Settings** to update provider preferences, prompt templates, and custom modes.
+- Use **AI Assist ▾ → Settings** to update provider preferences, prompt templates, output items, and custom modes.
+- Use the **AI Assist Components** section in Settings to show or hide Copilot and Claude independently.
 - If your team uses a custom Copilot agent, save that agent's chat URL so Copilot opens directly into your preferred experience.
+
+## Changelog
+
+### v1.6.0
+- Added per-provider enable/disable toggles (AI Assist Components) in Settings — AI Assist menu hides providers that are turned off
+- Replaced single output format textarea with a structured list of up to 10 individually managed output items per mode and custom prompt
+- Each output item has a configurable Default on/off setting that controls its pre-checked state in the pre-send modal
+- Added pre-send modal shown before every Copilot and Claude request with output section checkboxes and an optional additional guidance text field
+- Added Restore Default Output Items For All Modes preset button in Settings
+- Prompts now lead with the ticket subject so chat history entries reflect the ticket rather than the persona line
+- Backward-compatible: existing saved output format text from v1.5 is automatically parsed into output items on first load
 
 ## Requirements
 
