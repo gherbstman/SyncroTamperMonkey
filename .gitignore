@@ -1,0 +1,21 @@
+# secrets / config
+.env
+.env.*
+config.json
+secrets.json
+config/*.local.*
+
+# folders
+node_modules/
+logs/
+
+# file types
+*.log
+*.key
+*.pem
+
+# Files
+bookings-links.*
+bookings-links.tm.*
+bookings-links.tm.json
+Sample Syncro Ticket Page Source.html
